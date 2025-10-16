@@ -84,3 +84,30 @@ Every saved artifact is recorded in a transaction log under `~/Library/Applicati
 
 ## Support
 For CLI configuration, refer to the Codex documentation. The desktop app logs developer errors to the shell; use `npm run start` with `ELECTRON_ENABLE_LOGGING=1` for additional diagnostics.
+## macOS Code Signing & Notarization
+
+Electron apps distributed outside the App Store should be signed and notarized so they open without the “unidentified developer” warning.
+
+1) Developer ID certificate
+- Install a "Developer ID Application" certificate in your login keychain (Keychain Access › Certificates), or provide a `.p12` via env:
+  - `CSC_LINK` – HTTPS URL or Base64 data URI to the `.p12`
+  - `CSC_KEY_PASSWORD` – certificate password
+
+2) Notarization credentials
+- Use an App‑Specific Password for your Apple ID (recommended) or an App Store Connect API key.
+- Export as GitHub Secrets or local env vars:
+  - `APPLE_ID` – your Apple ID email
+  - `APPLE_APP_SPECIFIC_PASSWORD` – the 16‑char app‑specific password
+  - `APPLE_TEAM_ID` – your Team ID (e.g., ABCDE12345)
+
+3) Build
+```bash
+cd codex-desktop
+# auto‑discover signing identity from Keychain, notarize with env
+npm run build:mac:signed
+```
+
+Notes
+- The builder is configured with hardened runtime and entitlements at `assets/entitlements.mac.plist`.
+- Notarization is enabled (`notarize: true`) and uses the env vars above.
+- For CI, a ready‑to‑use workflow lives at `.github/workflows/mac-release.yml`.
