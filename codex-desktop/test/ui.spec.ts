@@ -1,0 +1,47 @@
+import { test, expect } from '@playwright/test';
+import { _electron as electron, ElectronApplication, Page } from 'playwright';
+import path from 'node:path';
+import childProcess from 'node:child_process';
+
+test.describe('Command + Canvas UI', () => {
+  let app: ElectronApplication;
+  let page: Page;
+  const cwd = path.resolve(__dirname, '..');
+
+  test.beforeAll(async () => {
+    // Build once for all tests
+    childProcess.execSync('npm run build:main', { cwd, stdio: 'inherit' });
+    childProcess.execSync('npm run build:renderer', { cwd, stdio: 'inherit' });
+  });
+
+  test.afterEach(async () => {
+    if (app) await app.close();
+  });
+
+  test('renders layout and runs plan -> accept flow', async () => {
+    app = await electron.launch({ args: ['.'], cwd, env: { ...process.env, NODE_ENV: 'production' } });
+    page = await app.firstWindow();
+
+    // Layout elements
+    await expect(page.getByTestId('command-bar')).toBeVisible();
+    await expect(page.getByTestId('canvas')).toBeVisible();
+    await expect(page.getByTestId('action-bar')).toBeVisible();
+    await expect(page.getByTestId('chip-tone')).toBeVisible();
+
+    // Enter a command, run, accept
+    await page.getByLabel('Command').fill('Summarize PDF');
+    await page.getByText('Run').first().click();
+
+    await expect(page.getByText('Steps')).toBeVisible();
+    const accept = page.getByRole('button', { name: 'Accept' });
+    await expect(accept).toBeDisabled();
+
+    await page.getByTestId('permission-network').check();
+    await expect(accept).toBeEnabled();
+    await accept.click();
+
+    // Should get stubbed artifact
+    await expect(page.getByLabel('Artifact')).toBeVisible();
+    await expect(page.getByLabel('Artifact')).toContainText('Stub run');
+  });
+});

@@ -1,0 +1,36 @@
+appId: com.example.codexdesktop
+productName: Codex Desktop
+asar: true
+directories:
+  output: release
+  buildResources: assets
+files:
+  - build/main/**
+  - build/renderer/**
+  - package.json
+  - config/.env.example
+mac:
+  target:
+    - dmg
+  category: public.app-category.developer-tools
+  icon: assets/icon.icns
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: msi
+      arch:
+        - x64
+  icon: assets/icon.ico
+  legalTrademarks: Codex Desktop
+linux:
+  target:
+    - AppImage
+    - deb
+  icon: assets/icon.png
+  maintainer: Codex Desktop Team <support@codex.local>
+  category: Development
+extraResources:
+  - from: assets
+    to: assets

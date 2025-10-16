@@ -1,0 +1,9 @@
+node_modules/
+build/
+release/
+.DS_Store
+*.log
+playwright-report/
+output/
+coverage/
+.tmp/

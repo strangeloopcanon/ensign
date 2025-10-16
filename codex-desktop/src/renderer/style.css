@@ -1,0 +1,38 @@
+:root { color-scheme: light dark; }
+body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; }
+/* Overall layout: command bar (top), content (with canvas + plan), action bar (bottom) */
+#root { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; }
+
+/* Command bar */
+.commandBar { padding: 8px 12px; display: flex; gap: 8px; align-items: center; border-bottom: 1px solid #4443; }
+.commandBar { flex-direction: column; align-items: stretch; }
+.commandRow { display: flex; gap: 8px; align-items: center; }
+.commandInput { flex: 1; padding: 8px 10px; border-radius: 8px; border: 1px solid #4443; }
+.chipsRow { margin-top: 6px; }
+.clarificationChips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { border-radius: 999px; border: 1px solid #4443; padding: 4px 10px; background: color-mix(in srgb, Canvas 80%, CanvasText 20%); font-size: 12px; cursor: pointer; }
+.chip.required { background: #f5a62322; border-color: #f5a62366; color: inherit; cursor: default; }
+
+/* Middle area: canvas + plan drawer */
+.content { display: grid; grid-template-columns: 1fr 280px; height: 100%; }
+.canvas { position: relative; overflow: auto; padding: 12px; }
+.artifact { white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.homeState { height: 100%; display: grid; place-content: center; text-align: center; opacity: 0.9; }
+.templates { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; margin-top: 12px; }
+.templateTile { padding: 12px; border: 1px solid #4443; border-radius: 10px; text-align: left; }
+.diffView { margin-top: 12px; padding-top: 8px; border-top: 1px dashed #4443; }
+
+.planDrawer { border-left: 1px solid #4443; overflow: auto; padding: 8px 12px; }
+.planHeader { display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; background: color-mix(in lch, Canvas, CanvasText 2%); padding: 8px 0; }
+.planContent { font-size: 13px; }
+.sectionTitle { font-weight: 600; margin: 10px 0 4px; }
+.permissionList { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+.permissionItem { display: flex; gap: 8px; align-items: center; }
+.configHint { margin-top: 6px; font-size: 12px; color: color-mix(in srgb, CanvasText 70%, Canvas 30%); }
+
+/* Action bar */
+.actionBar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-top: 1px solid #4443; }
+.spacer { flex: 1; }
+
+button { padding: 6px 10px; }
+.settings { color: #0a84ff; text-decoration: none; cursor: pointer; }

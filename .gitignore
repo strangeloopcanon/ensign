@@ -1,0 +1,23 @@
+# Root ignores
+.env
+.env.*
+.DS_Store
+*.log
+node_modules/
+coverage/
+playwright-report/
+test-results/
+.tmp/
+.idea/
+.vscode/
+
+# Project outputs
+codex-desktop/build/
+codex-desktop/release/
+codex-desktop/node_modules/
+codex-desktop/test-results/
+
+# OS junk
+Thumbs.db
+ehthumbs.db
+Desktop.ini
