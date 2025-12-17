@@ -8,6 +8,7 @@ import os from 'node:os';
 test.describe('Diff preview', () => {
   let app: ElectronApplication;
   let page: Page;
+  let userDataDir: string | null = null;
   const cwd = path.resolve(__dirname, '..');
 
   test.beforeAll(async () => {
@@ -17,6 +18,8 @@ test.describe('Diff preview', () => {
 
   test.afterEach(async () => {
     if (app) await app.close();
+    if (userDataDir) fs.rmSync(userDataDir, { recursive: true, force: true });
+    userDataDir = null;
   });
 
   test('shows diff when source file provided', async () => {
@@ -24,15 +27,27 @@ test.describe('Diff preview', () => {
     fs.writeFileSync(tmp, 'Original line');
 
     try {
-      app = await electron.launch({ args: ['.'], cwd, env: { ...process.env, NODE_ENV: 'production' } });
+      userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-desktop-test-'));
+      app = await electron.launch({
+        args: ['.'],
+        cwd,
+        env: {
+          ...process.env,
+          NODE_ENV: 'production',
+          CODEX_DESKTOP_FORCE_STUB: '1',
+          CODEX_DESKTOP_USER_DATA: userDataDir,
+        },
+      });
       page = await app.firstWindow();
 
       await page.getByLabel('Command').fill('Improve this text');
       await page.evaluate((filePath) => window.codex.debugEmitFiles?.([filePath]), tmp);
 
       await page.getByText('Run').first().click();
-      await page.getByTestId('permission-read-files').check();
-      await page.getByTestId('permission-network').check();
+      const perms = page.locator('input[type="checkbox"][data-testid^="permission-"]');
+      for (let i = 0, n = await perms.count(); i < n; i++) {
+        await perms.nth(i).check();
+      }
       await page.getByRole('button', { name: 'Accept' }).click();
 
       await expect(page.getByLabel('Diff')).toBeVisible();

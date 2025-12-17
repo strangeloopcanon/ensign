@@ -1,6 +1,6 @@
 # Codex Desktop
 
-Command-first Electron app that wraps the Codex CLI/SDK with a single-screen "Command + Canvas" experience. Type or drop a task, review the dry-run plan, grant permissions, then accept to generate the artifact. Deterministic outputs are versioned to an `AI Output` folder and every destructive action is undoable.
+Command-first Electron app that wraps the Codex CLI/SDK with a single-screen "Command + Canvas" experience. Type or drop a task, review the dry-run plan, grant permissions, then accept to generate the artifact. Deterministic outputs are versioned to an `AI Output` folder and saves are undoable.
 
 ## Quick Start
 1. **Install deps**
@@ -8,15 +8,21 @@ Command-first Electron app that wraps the Codex CLI/SDK with a single-screen "Co
    cd codex-desktop
    npm install
    ```
-2. **Configure Codex CLI** (for models + MCP connectors)
-   ```bash
-   # Authenticate and add connectors (examples)
-   codex login
-   codex mcp add gmail
-   codex mcp add google-calendar
-   ```
-   The desktop app reads the same `~/.codex/config.toml` and MCP registry that the CLI uses. Set `CODEX_HOME` if you keep config elsewhere.
-3. **Run in dev**
+2. **Configure API key**
+   - On first launch, Codex Desktop prompts for a key. Paste it into **Settings** (stored in the app’s `.env`).
+   - Or set `OPENAI_API_KEY` (or `CODEX_API_KEY`) in a local `.env`:
+     - `codex-desktop/.env` (preferred when running from `codex-desktop/`)
+     - repo root `.env` (also supported in dev)
+3. **(Optional) Configure Codex config + MCP connectors**
+   - By default the app keeps its own Codex config under its app data directory (no manual copying).
+   - You can switch to your existing `~/.codex` config or import it from Settings.
+   - Use the Codex CLI to manage connectors:
+     ```bash
+     codex login
+     codex mcp add gmail
+     codex mcp add google-calendar
+     ```
+4. **Run in dev**
    ```bash
    npm run start
    ```
@@ -44,6 +50,7 @@ Artifacts land in `release/` and the runnable unpacked apps live under `release/
 
 ## Command + Canvas UX
 - **Command bar** accepts text, drag-and-drop files, and provides inline chips (tone, length, target app, etc.).
+- **Toolbar** shows workspace/model/LLM readiness and provides quick access to folder selection + Settings.
 - **Plan drawer** shows the dry-run plan, detected permissions (files, network, MCP connectors), sources, and current Codex config location. Required items must be checked before **Accept** enables.
 - **Canvas** renders the working artifact; when a source file is provided the diff view highlights changes line-by-line.
 - **Action bar** provides Run/Accept/Edit/Save/Undo/Redo. Saves are versioned under `~/Documents/AI Output/`.
@@ -60,8 +67,13 @@ Artifacts land in `release/` and the runnable unpacked apps live under `release/
 - Optional connectors stay unchecked; toggle them to document consent when you know the task needs them.
 
 ## Configuration Reference
-- `OPENAI_API_KEY` can live in `.env` at the repo root for dev. Packaged builds store it under Electron’s `userData` directory (`~/Library/Application Support/Codex Desktop/.env` on macOS).
-- The app surfaces the effective config path and whether it exists. Click **Open Config** from the future settings menu or edit it directly.
+- `OPENAI_API_KEY` (or `CODEX_API_KEY`) can be set via the in-app Settings UI or a local `.env`. Packaged builds store it under Electron’s `userData` directory (`~/Library/Application Support/Codex Desktop/.env` on macOS).
+- Default model is `gpt-5.2` (override via Settings).
+- **Model override** and **sandbox mode** are app settings; clear model to use the active Codex config (or Codex defaults).
+- The app surfaces the effective config path and whether it exists. Use **Settings → Codex config → Open** to edit it.
+
+## Stub mode
+Set `CODEX_DESKTOP_FORCE_STUB=1` to run in deterministic stub mode (no network/model calls). This is mainly for UI testing and demos.
 
 ## Testing
 Playwright exercises the core flows end-to-end.

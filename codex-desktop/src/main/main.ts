@@ -2,23 +2,48 @@ import { app, BrowserWindow, ipcMain, shell, dialog, globalShortcut, clipboard }
 import path from 'node:path';
 import fs from 'node:fs';
 import * as url from 'node:url';
+import os from 'node:os';
 import { runTask } from './codex';
 import { readStatus, getConfigPath } from './config';
 import dotenv from 'dotenv';
 import { recordCreate, undo as txUndo, redo as txRedo, history as txHistory } from './transactions';
+import { readSettings, updateSettings, type AppSettings, type SandboxMode } from './settings';
 
 const isDev = process.env.NODE_ENV !== 'production' && !app.isPackaged;
 let cachedEnvPath: string | null = null;
+const originalCodexHome = process.env.CODEX_HOME;
+
+const userDataOverride = process.env.CODEX_DESKTOP_USER_DATA;
+if (userDataOverride) {
+  try {
+    app.setPath('userData', path.resolve(userDataOverride));
+  } catch (e) {
+    console.warn('Failed to set userData override', e);
+  }
+}
+
+function findUpwards(startDir: string, predicate: (dir: string) => boolean): string | null {
+  let current = path.resolve(startDir);
+  while (true) {
+    if (predicate(current)) return current;
+    const parent = path.dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+}
 
 function resolveProjectRoot(): string {
-  if (isDev) return process.cwd();
-  return app.getAppPath();
+  if (!isDev) return app.getAppPath();
+  // Prefer the git root if available so dev env/config can live at repo root.
+  return findUpwards(process.cwd(), (dir) => fs.existsSync(path.join(dir, '.git'))) ?? process.cwd();
 }
 
 function resolveEnvPath(): string {
   if (cachedEnvPath) return cachedEnvPath;
   if (isDev) {
-    cachedEnvPath = path.resolve(resolveProjectRoot(), '.env');
+    const direct = path.resolve(process.cwd(), '.env');
+    if (fs.existsSync(direct)) cachedEnvPath = direct;
+    else cachedEnvPath = path.resolve(resolveProjectRoot(), '.env');
   } else {
     cachedEnvPath = path.join(app.getPath('userData'), '.env');
   }
@@ -28,6 +53,45 @@ function resolveEnvPath(): string {
 function loadEnv() {
   const envPath = resolveEnvPath();
   if (fs.existsSync(envPath)) dotenv.config({ path: envPath });
+}
+
+function getApiKeyPresent(): boolean {
+  return !!(process.env.OPENAI_API_KEY || process.env.CODEX_API_KEY);
+}
+
+function getAppCodexHomeDir(): string {
+  return path.join(app.getPath('userData'), 'codex');
+}
+
+function getGlobalCodexConfigPath(): string {
+  const dir = originalCodexHome || path.join(os.homedir(), '.codex');
+  return path.join(dir, 'config.toml');
+}
+
+function ensureCodexConfigAt(configPath: string, model: string) {
+  const dir = path.dirname(configPath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  if (fs.existsSync(configPath)) return;
+  const content = `model = "${model}"\npreferred_auth_method = "env"\n\n[mcp_servers]\n`;
+  fs.writeFileSync(configPath, content, 'utf8');
+}
+
+function applyCodexHomeFromSettings(settings: AppSettings) {
+  if (settings.codexHomeMode === 'app') {
+    const home = getAppCodexHomeDir();
+    process.env.CODEX_HOME = home;
+    const model = settings.modelOverride || 'gpt-5.2';
+    ensureCodexConfigAt(path.join(home, 'config.toml'), model);
+  } else {
+    if (originalCodexHome) process.env.CODEX_HOME = originalCodexHome;
+    else delete process.env.CODEX_HOME;
+  }
+}
+
+function getOutputDir(): string {
+  const settings = readSettings();
+  if (settings.outputDir) return settings.outputDir;
+  return path.join(app.getPath('documents'), 'AI Output');
 }
 
 function createWindow() {
@@ -83,6 +147,7 @@ if (!gotLock) {
 
   app.whenReady().then(() => {
     loadEnv();
+    applyCodexHomeFromSettings(readSettings());
     const win = createWindow();
 
     // Deliver any pending file-open events
@@ -115,7 +180,7 @@ app.on('window-all-closed', () => {
 });
 
 // IPC
-ipcMain.handle('codex:run', async (event, { prompt, cwd }) => {
+ipcMain.handle('codex:run', async (event, { prompt, cwd, sandboxMode, modelOverride }) => {
   if (cwd) {
     try {
       const resolved = path.resolve(cwd);
@@ -139,7 +204,14 @@ ipcMain.handle('codex:run', async (event, { prompt, cwd }) => {
     }
   };
   try {
-    const result = await runTask({ prompt, cwd }, append);
+    const saved = readSettings();
+    const effectiveSandboxMode = isSandboxMode(sandboxMode) ? sandboxMode : saved.sandboxMode;
+    const effectiveModelOverride =
+      typeof modelOverride === 'string' ? modelOverride : typeof saved.modelOverride === 'string' ? saved.modelOverride : null;
+    const result = await runTask(
+      { prompt, cwd, sandboxMode: effectiveSandboxMode, modelOverride: effectiveModelOverride },
+      append
+    );
     return { ok: true, text: result };
   } catch (err: any) {
     return { ok: false, error: err?.message || String(err) };
@@ -177,6 +249,7 @@ ipcMain.handle('codex:saveApiKey', async (_e, key: string) => {
     others.push(`OPENAI_API_KEY=${key}`);
     fs.writeFileSync(envPath, others.join('\n') + '\n', 'utf8');
     process.env.OPENAI_API_KEY = key;
+    applyCodexHomeFromSettings(readSettings());
     return { ok: true, path: envPath };
   } catch (e: any) {
     return { ok: false, error: e?.message || String(e) };
@@ -189,13 +262,103 @@ ipcMain.handle('codex:pickCwd', async () => {
   return { ok: true, path: res.filePaths[0] };
 });
 
+ipcMain.handle('codex:getEnvInfo', async () => {
+  const openAiKey = process.env.OPENAI_API_KEY;
+  const codexKey = process.env.CODEX_API_KEY;
+  const apiKeyPresent = !!(openAiKey || codexKey);
+  const apiKeyName = openAiKey ? 'OPENAI_API_KEY' : codexKey ? 'CODEX_API_KEY' : null;
+  const stubMode = process.env.CODEX_DESKTOP_FORCE_STUB === '1';
+  return { ok: true, envPath: resolveEnvPath(), apiKeyPresent, apiKeyName, stubMode };
+});
+
+ipcMain.handle('codex:getSettings', async () => {
+  return { ok: true, settings: readSettings() };
+});
+
+function isSandboxMode(v: unknown): v is SandboxMode {
+  return v === 'read-only' || v === 'workspace-write' || v === 'danger-full-access';
+}
+
+ipcMain.handle('codex:updateSettings', async (_e, patch: Partial<AppSettings>) => {
+  try {
+    const next: Partial<AppSettings> = {};
+    if (typeof patch?.workspaceDir === 'string' || patch?.workspaceDir === null) next.workspaceDir = patch.workspaceDir;
+    if (typeof patch?.outputDir === 'string' || patch?.outputDir === null) next.outputDir = patch.outputDir;
+    if (typeof patch?.modelOverride === 'string' || patch?.modelOverride === null) next.modelOverride = patch.modelOverride;
+    if (patch?.codexHomeMode === 'app' || patch?.codexHomeMode === 'global') next.codexHomeMode = patch.codexHomeMode;
+    if (typeof patch?.includeFileContents === 'boolean') next.includeFileContents = patch.includeFileContents;
+    if (isSandboxMode((patch as any)?.sandboxMode)) next.sandboxMode = (patch as any).sandboxMode;
+    const updated = updateSettings(next);
+    applyCodexHomeFromSettings(updated);
+    return { ok: true, settings: updated };
+  } catch (e: any) {
+    return { ok: false, error: e?.message || String(e) };
+  }
+});
+
+ipcMain.handle('codex:initCodexConfig', async () => {
+  try {
+    const settings = readSettings();
+    applyCodexHomeFromSettings(settings);
+    const p = getConfigPath();
+    if (!fs.existsSync(p)) {
+      const model = settings.modelOverride || 'gpt-5.2';
+      ensureCodexConfigAt(p, model);
+    }
+    return { ok: true, path: p };
+  } catch (e: any) {
+    return { ok: false, error: e?.message || String(e) };
+  }
+});
+
+ipcMain.handle('codex:importGlobalCodexConfig', async () => {
+  try {
+    const settings = readSettings();
+    if (settings.codexHomeMode !== 'app') return { ok: false, error: 'Switch to app-managed Codex config first.' };
+    const src = getGlobalCodexConfigPath();
+    if (!fs.existsSync(src)) return { ok: false, error: `Global config not found: ${src}` };
+    applyCodexHomeFromSettings(settings);
+    const dest = getConfigPath();
+    const dir = path.dirname(dest);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.copyFileSync(src, dest);
+    return { ok: true, path: dest };
+  } catch (e: any) {
+    return { ok: false, error: e?.message || String(e) };
+  }
+});
+
 // Plan preview: compute a simple dry-run plan and permissions
-ipcMain.handle('codex:plan', async (_e, payload: { prompt: string; files?: { name: string }[] }) => {
+ipcMain.handle(
+  'codex:plan',
+  async (
+    _e,
+    payload: { prompt: string; files?: { name: string }[]; cwd?: string; sandboxMode?: SandboxMode; modelOverride?: string | null }
+  ) => {
   const files = payload?.files || [];
+  const stubMode = process.env.CODEX_DESKTOP_FORCE_STUB === '1';
+  const apiKeyPresent = getApiKeyPresent();
+  let cwd = payload?.cwd;
+  if (cwd) {
+    try {
+      const resolved = path.resolve(cwd);
+      const stats = fs.statSync(resolved);
+      if (!stats.isDirectory()) cwd = undefined;
+      else cwd = resolved;
+    } catch {
+      cwd = undefined;
+    }
+  }
+  const sandboxMode = isSandboxMode(payload?.sandboxMode) ? payload.sandboxMode : readSettings().sandboxMode;
+  const modelOverride = typeof payload?.modelOverride === 'string' ? payload.modelOverride.trim() : null;
   const steps = [
     { id: 'parse', text: 'Parse inputs and understand intent' },
+    cwd ? { id: 'cwd', text: `Work in folder: ${cwd}` } : null,
     files.length > 0 ? { id: 'read', text: `Read ${files.length} file(s)` } : { id: 'noop', text: 'No external files' },
+    !stubMode && !apiKeyPresent ? { id: 'key', text: 'Configure API key in Settings' } : null,
     { id: 'gen', text: 'Generate artifact' },
+    sandboxMode !== 'read-only' ? { id: 'writes', text: `Potentially write files (${sandboxMode})` } : null,
+    modelOverride ? { id: 'model', text: `Use model override: ${modelOverride}` } : null,
   ].filter(Boolean) as { id: string; text: string }[];
   const promptText = (payload?.prompt || '').toLowerCase();
   const needsEmail = /\b(email|mail|inbox|reply|gmail)\b/.test(promptText);
@@ -217,19 +380,20 @@ ipcMain.handle('codex:plan', async (_e, payload: { prompt: string; files?: { nam
     ...(files.length
       ? [{ id: 'read-files', label: `Read ${files.length} file(s)`, required: true }]
       : []),
-    { id: 'network', label: 'Network access (model call)', required: true },
+    ...(!stubMode ? [{ id: 'network', label: 'Network access (model call)', required: true }] : []),
+    ...(sandboxMode !== 'read-only' ? [{ id: 'write-workspace', label: `Write files (${sandboxMode})`, required: true }] : []),
     ...mcpPermissions,
   ];
-  const sources = files.map((f) => f.name);
+  const sources = [...(cwd ? [cwd] : []), ...files.map((f) => f.name)];
   return { ok: true, plan: { steps, permissions, sources } };
 });
 
 // Save artifact deterministically with versioning
 ipcMain.handle('codex:saveArtifact', async (_e, payload: { name: string; kind: 'text'; content: string }) => {
   try {
-    const baseDir = path.join(app.getPath('documents'), 'AI Output');
+    const baseDir = getOutputDir();
     if (!fs.existsSync(baseDir)) fs.mkdirSync(baseDir, { recursive: true });
-    const safeName = payload.name.replace(/[^\w\-\s\.]+/g, '').trim() || 'artifact';
+    const safeName = payload.name.replace(/[^\w\-\s\.]+/g, '').trim().slice(0, 80) || 'artifact';
     const targetBase = path.join(baseDir, safeName + '.txt');
     let target = targetBase;
     let i = 1;
@@ -250,6 +414,19 @@ ipcMain.handle('codex:saveArtifact', async (_e, payload: { name: string; kind: '
 ipcMain.handle('codex:undo', async () => txUndo());
 ipcMain.handle('codex:redo', async () => txRedo());
 ipcMain.handle('codex:getHistory', async () => ({ ok: true, history: txHistory() }));
+
+ipcMain.handle('codex:openOutputFolder', async () => {
+  const p = getOutputDir();
+  const res = await shell.openPath(p);
+  return { ok: !res, path: p, error: res || null };
+});
+
+ipcMain.handle('codex:openPath', async (_e, p: string) => {
+  if (!p || typeof p !== 'string') return { ok: false, error: 'Missing path' };
+  const resolved = path.resolve(p);
+  const res = await shell.openPath(resolved);
+  return { ok: !res, path: resolved, error: res || null };
+});
 
 // Simple text read for diff previews
 ipcMain.handle('codex:readFileText', async (_e, filePath: string) => {

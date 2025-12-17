@@ -3,10 +3,12 @@ import { _electron as electron, ElectronApplication, Page } from 'playwright';
 import path from 'node:path';
 import childProcess from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 
 test.describe('Save / Undo / Redo', () => {
   let app: ElectronApplication;
   let page: Page;
+  let userDataDir: string | null = null;
   const cwd = path.resolve(__dirname, '..');
 
   test.beforeAll(async () => {
@@ -16,15 +18,30 @@ test.describe('Save / Undo / Redo', () => {
 
   test.afterEach(async () => {
     if (app) await app.close();
+    if (userDataDir) fs.rmSync(userDataDir, { recursive: true, force: true });
+    userDataDir = null;
   });
 
   test('saves artifact, undo removes it, redo restores it', async () => {
-    app = await electron.launch({ args: ['.'], cwd, env: { ...process.env, NODE_ENV: 'production' } });
+    userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-desktop-test-'));
+    app = await electron.launch({
+      args: ['.'],
+      cwd,
+      env: {
+        ...process.env,
+        NODE_ENV: 'production',
+        CODEX_DESKTOP_FORCE_STUB: '1',
+        CODEX_DESKTOP_USER_DATA: userDataDir,
+      },
+    });
     page = await app.firstWindow();
 
     await page.getByLabel('Command').fill('make a short note');
     await page.getByText('Run').first().click();
-    await page.getByTestId('permission-network').check();
+    const perms = page.locator('input[type="checkbox"][data-testid^="permission-"]');
+    for (let i = 0, n = await perms.count(); i < n; i++) {
+      await perms.nth(i).check();
+    }
     await page.getByRole('button', { name: 'Accept' }).click();
 
     // Save artifact

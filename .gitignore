@@ -1,6 +1,7 @@
 # Root ignores
 .env
 .env.*
+!codex-desktop/config/.env.example
 .DS_Store
 *.log
 node_modules/
