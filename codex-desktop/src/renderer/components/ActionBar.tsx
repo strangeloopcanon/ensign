@@ -2,6 +2,7 @@ import React from 'react';
 
 type Props = {
   canAccept: boolean;
+  canSave: boolean;
   running: boolean;
   onRun: () => void;
   onAccept: () => void;
@@ -11,7 +12,7 @@ type Props = {
   onRedo: () => void;
 };
 
-export function ActionBar({ canAccept, running, onRun, onAccept, onEdit, onSave, onUndo, onRedo }: Props) {
+export function ActionBar({ canAccept, canSave, running, onRun, onAccept, onEdit, onSave, onUndo, onRedo }: Props) {
   const [canUndo, setCanUndo] = React.useState(false);
   const [canRedo, setCanRedo] = React.useState(false);
 
@@ -35,7 +36,7 @@ export function ActionBar({ canAccept, running, onRun, onAccept, onEdit, onSave,
       <button onClick={onRun} disabled={running}>Run</button>
       <button onClick={onAccept} disabled={!canAccept}>Accept</button>
       <button onClick={onEdit}>Edit</button>
-      <button onClick={onSave} disabled={!canAccept}>Save As</button>
+      <button onClick={onSave} disabled={!canSave}>Save As</button>
       <div className="spacer" />
       <button onClick={async () => { await onUndo(); refresh(); }} disabled={!canUndo}>Undo</button>
       <button onClick={async () => { await onRedo(); refresh(); }} disabled={!canRedo}>Redo</button>
