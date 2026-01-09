@@ -1,8 +1,18 @@
-# Codex Desktop
+# Ensign (Codex Desktop)
 
 Command-first Electron app that wraps the Codex CLI/SDK with a single-screen "Command + Canvas" experience. Type or drop a task, review the dry-run plan, grant permissions, then accept to generate the artifact. Deterministic outputs are versioned to an `AI Output` folder and saves are undoable.
 
-## Quick Start
+## Install & Use (Packaged App)
+If you have a packaged build, distribute the `.dmg` (it contains the `.app`).
+
+1. Open the `.dmg` → drag the app into **Applications**.
+2. Launch the app from **Applications**.
+3. First launch opens **Settings** to paste an API key (each user enters their own key).
+4. Choose a **Workspace folder** in **Settings** (or drag a file into the window to auto-set it).
+5. Type a task → review the plan → check required permissions → **Accept** to run.
+6. Use **Save** to write outputs into `~/Documents/AI Output/` (or your Settings override).
+
+## Developer Quick Start
 1. **Install deps**
    ```bash
    cd codex-desktop
@@ -67,7 +77,7 @@ Artifacts land in `release/` and the runnable unpacked apps live under `release/
 - Optional connectors stay unchecked; toggle them to document consent when you know the task needs them.
 
 ## Configuration Reference
-- `OPENAI_API_KEY` (or `CODEX_API_KEY`) can be set via the in-app Settings UI or a local `.env`. Packaged builds store it under Electron’s `userData` directory (`~/Library/Application Support/Codex Desktop/.env` on macOS).
+- `OPENAI_API_KEY` (or `CODEX_API_KEY`) can be set via the in-app Settings UI or a local `.env`. Packaged builds store it under Electron’s `userData` directory (the Settings UI shows the exact path; typically `~/Library/Application Support/<App Name>/.env` on macOS).
 - Default model is `gpt-5.2` (override via Settings).
 - **Model override** and **sandbox mode** are app settings; clear model to use the active Codex config (or Codex defaults).
 - The app surfaces the effective config path and whether it exists. Use **Settings → Codex config → Open** to edit it.
@@ -87,7 +97,7 @@ The suite runs serially (single-instance Electron) and covers:
 - Deterministic save, undo, and redo.
 
 ## Undo / Versioning
-Every saved artifact is recorded in a transaction log under `~/Library/Application Support/Codex Desktop/transactions/`. Undo temporarily moves files into a private trash folder; Redo restores them. Versioned filenames (`<name> (1).txt`, etc.) prevent accidental overwrites.
+Every saved artifact is recorded in a transaction log under Electron’s `userData` directory (typically `~/Library/Application Support/<App Name>/transactions/` on macOS). Undo temporarily moves files into a private trash folder; Redo restores them. Versioned filenames (`<name> (1).txt`, etc.) prevent accidental overwrites.
 
 ## Limitations & Next Steps
 - Permission heuristics are intentionally conservative. If a task implicitly needs another connector, toggle it manually before accepting.
@@ -96,9 +106,15 @@ Every saved artifact is recorded in a transaction log under `~/Library/Applicati
 
 ## Support
 For CLI configuration, refer to the Codex documentation. The desktop app logs developer errors to the shell; use `npm run start` with `ELECTRON_ENABLE_LOGGING=1` for additional diagnostics.
+
 ## macOS Code Signing & Notarization
 
 Electron apps distributed outside the App Store should be signed and notarized so they open without the “unidentified developer” warning.
+
+Prereq: install Xcode Command Line Tools (you do not need full Xcode):
+```bash
+xcode-select --install
+```
 
 1) Developer ID certificate
 - Install a "Developer ID Application" certificate in your login keychain (Keychain Access › Certificates), or provide a `.p12` via env:
@@ -106,7 +122,9 @@ Electron apps distributed outside the App Store should be signed and notarized s
   - `CSC_KEY_PASSWORD` – certificate password
 
 2) Notarization credentials
-- Use an App‑Specific Password for your Apple ID (recommended) or an App Store Connect API key.
+- Recommended: use `notarytool` and a Keychain profile (local builds), or use env vars (CI).
+
+**Option A: env vars (CI-friendly)**
 - Export as GitHub Secrets or local env vars:
   - `APPLE_ID` – your Apple ID email
   - `APPLE_APP_SPECIFIC_PASSWORD` – the 16‑char app‑specific password
@@ -119,7 +137,23 @@ cd codex-desktop
 npm run build:mac:signed
 ```
 
+**Option B: Keychain profile (recommended locally)**
+```bash
+# one-time: store notarization creds in Keychain
+xcrun notarytool store-credentials ensign-notary \
+  --apple-id "you@example.com" \
+  --team-id "ABCDE12345"
+
+# build (signed) without electron-builder notarization
+npx electron-builder --mac -c.mac.notarize=false
+
+# submit + wait, then staple
+xcrun notarytool submit "release/<YourApp>-<version>-arm64.dmg" \
+  --keychain-profile ensign-notary --wait --output-format json --no-progress
+xcrun stapler staple -v "release/<YourApp>-<version>-arm64.dmg"
+```
+
 Notes
 - The builder is configured with hardened runtime and entitlements at `assets/entitlements.mac.plist`.
-- Notarization is enabled (`notarize: true`) and uses the env vars above.
+- Notarization is enabled (`notarize: true`) and uses the env vars above; if notarization flakes locally, use Option B to submit/staple via `notarytool`.
 - For CI, a ready‑to‑use workflow lives at `.github/workflows/mac-release.yml`.
