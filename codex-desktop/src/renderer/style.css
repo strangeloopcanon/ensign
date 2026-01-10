@@ -3,6 +3,11 @@ body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; marg
 /* Overall layout: command bar (top), content (with canvas + plan), action bar (bottom) */
 #root { display: grid; grid-template-rows: auto auto 1fr auto; height: 100vh; }
 
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinner { width: 16px; height: 16px; border-radius: 999px; border: 2px solid color-mix(in srgb, CanvasText 40%, Canvas 60%); border-top-color: CanvasText; animation: spin 0.9s linear infinite; display: inline-block; }
+.spinner.small { width: 12px; height: 12px; border-width: 2px; }
+.buttonInner { display: inline-flex; align-items: center; gap: 8px; }
+
 /* Command bar */
 .commandBar { padding: 8px 12px; display: flex; gap: 8px; align-items: center; border-bottom: 1px solid #4443; }
 .commandBar { flex-direction: column; align-items: stretch; }
@@ -23,6 +28,8 @@ body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; marg
 .canvas { position: relative; overflow: auto; padding: 12px; }
 .artifact { white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .homeState { height: 100%; display: grid; place-content: center; text-align: center; opacity: 0.9; }
+.runningState { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; }
+.runningInner { display: inline-flex; gap: 10px; align-items: center; padding: 12px 14px; border: 1px solid #4443; border-radius: 12px; background: color-mix(in srgb, Canvas 85%, CanvasText 15%); }
 .templates { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; margin-top: 12px; }
 .templateTile { padding: 12px; border: 1px solid #4443; border-radius: 10px; text-align: left; }
 .diffView { margin-top: 12px; padding-top: 8px; border-top: 1px dashed #4443; }

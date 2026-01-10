@@ -46,6 +46,8 @@ function App() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [envInfo, setEnvInfo] = useState<{ envPath?: string; apiKeyPresent?: boolean; apiKeyName?: 'OPENAI_API_KEY'|'CODEX_API_KEY'|null; stubMode?: boolean } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const runStartedAtRef = React.useRef<number | null>(null);
+  const [, setRunningTick] = useState(0);
 
   const plannedInputsKey = useMemo(() => {
     const fileKey = dropped.map((f) => f.path || f.name).join('|');
@@ -100,6 +102,12 @@ function App() {
       try { unsubFiles && unsubFiles(); } catch {}
     };
   }, [refreshStatus, settings.workspaceDir]);
+
+  useEffect(() => {
+    if (!running) return;
+    const t = setInterval(() => setRunningTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [running]);
 
   // If inputs change after a plan is generated, force a new preview to avoid running with a stale plan.
   useEffect(() => {
@@ -176,6 +184,7 @@ function App() {
       return;
     }
     setPlanOpen(false);
+    runStartedAtRef.current = Date.now();
     setRunning(true);
     setArtifact({ kind: 'text', content: '' });
     let streamed = '';
@@ -212,17 +221,21 @@ function App() {
       }
     }
 
-    const res = await window.codex.run(effectivePrompt, {
-      cwd: settings.workspaceDir || undefined,
-      sandboxMode: settings.sandboxMode,
-      modelOverride: settings.modelOverride,
-    });
-    setRunning(false);
-    try { unsub && unsub(); } catch {}
-    if (res.ok) {
-      setArtifact({ kind: 'text', content: res.text || streamed || '' });
-    } else {
-      setArtifact({ kind: 'text', content: `Error: ${res.error}` });
+    try {
+      const res = await window.codex.run(effectivePrompt, {
+        cwd: settings.workspaceDir || undefined,
+        sandboxMode: settings.sandboxMode,
+        modelOverride: settings.modelOverride,
+      });
+      if (res.ok) {
+        setArtifact({ kind: 'text', content: res.text || streamed || '' });
+      } else {
+        setArtifact({ kind: 'text', content: `Error: ${res.error}` });
+      }
+    } finally {
+      setRunning(false);
+      runStartedAtRef.current = null;
+      try { unsub && unsub(); } catch {}
     }
   };
 
@@ -249,6 +262,8 @@ function App() {
   const canRun = !!plan && canAcceptWithPermissions;
   const canSave = !!artifact?.content;
   const showHome = home && !prompt.trim() && dropped.length === 0 && !artifact?.content;
+  const runningSeconds =
+    running && runStartedAtRef.current != null ? Math.max(0, Math.floor((Date.now() - runStartedAtRef.current) / 1000)) : null;
   const workspaceLabel = settings.workspaceDir
     ? truncateMiddle(abbreviatePath(settings.workspaceDir), 44)
     : 'not set';
@@ -271,8 +286,9 @@ function App() {
           }
           acceptPlan();
         }}
-        primaryLabel={plan ? (canRun ? 'Run' : 'Review plan') : 'Preview plan'}
+        primaryLabel={running ? 'Running…' : plan ? (canRun ? 'Run' : 'Review plan') : 'Preview plan'}
         primaryDisabled={running || !prompt.trim()}
+        primaryBusy={running}
         onDropFiles={onDropFiles}
       />
       <div className="toolbar" data-testid="toolbar">
@@ -286,6 +302,14 @@ function App() {
           <span className="badge">
             {envInfo?.stubMode ? 'LLM: stub' : envInfo?.apiKeyPresent ? 'LLM: ready' : 'LLM: needs key'}
           </span>
+          {running ? (
+            <span className="badge" aria-live="polite">
+              <span className="buttonInner">
+                <span className="spinner small" aria-hidden="true" />
+                <span>{`Running${runningSeconds != null ? ` · ${runningSeconds}s` : ''}`}</span>
+              </span>
+            </span>
+          ) : null}
           {dropped.length ? <span className="badge">{`sources: ${dropped.length}`}</span> : null}
         </div>
         <div className="toolbarRight">
@@ -306,7 +330,7 @@ function App() {
         </div>
       </div>
       <div className="content">
-        <Canvas home={showHome} artifact={artifact}>
+        <Canvas home={showHome} artifact={artifact} running={running}>
           {showHome && (
             <HomeTemplates onPick={(t) => { setPrompt(t + ' '); }} />
           )}
