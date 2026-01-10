@@ -1,5 +1,5 @@
-appId: com.example.codexdesktop
-productName: Codex Desktop
+appId: com.strangeloopcanon.ensign
+productName: Ensign
 asar: true
 asarUnpack:
   - "**/node_modules/@openai/codex-sdk/vendor/**"
@@ -30,13 +30,13 @@ win:
       arch:
         - x64
   icon: assets/icon.ico
-  legalTrademarks: Codex Desktop
+  legalTrademarks: Ensign
 linux:
   target:
     - AppImage
     - deb
   icon: assets/icon.png
-  maintainer: Codex Desktop Team <support@codex.local>
+  maintainer: Ensign Team <support@ensign.local>
   category: Development
 extraResources:
   - from: assets
