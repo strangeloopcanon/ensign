@@ -3,12 +3,19 @@ import React from 'react';
 type Props = {
   value: string;
   onChange: (v: string) => void;
-  onRun: () => void;
+  onPrimaryAction: () => void;
+  primaryLabel: string;
+  primaryDisabled?: boolean;
   onDropFiles: (files: File[]) => void;
-  chips?: React.ReactNode;
 };
 
-export function CommandBar({ value, onChange, onRun, onDropFiles, chips }: Props) {
+export function CommandBar({ value, onChange, onPrimaryAction, primaryLabel, primaryDisabled, onDropFiles }: Props) {
+  const inputRef = React.useRef<HTMLInputElement | null>(null);
+
+  React.useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
     const files = Array.from(e.dataTransfer.files || []);
@@ -19,6 +26,7 @@ export function CommandBar({ value, onChange, onRun, onDropFiles, chips }: Props
     <div className="commandBar" data-testid="command-bar" onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
       <div className="commandRow">
         <input
+          ref={inputRef}
           aria-label="Command"
           className="commandInput"
           type="text"
@@ -26,12 +34,13 @@ export function CommandBar({ value, onChange, onRun, onDropFiles, chips }: Props
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.nativeEvent.isComposing) onRun();
+            if (e.key === 'Enter' && !e.nativeEvent.isComposing) onPrimaryAction();
           }}
         />
-        <button onClick={onRun}>Run</button>
+        <button onClick={onPrimaryAction} disabled={primaryDisabled}>
+          {primaryLabel}
+        </button>
       </div>
-      {chips && <div className="chipsRow">{chips}</div>}
     </div>
   );
 }

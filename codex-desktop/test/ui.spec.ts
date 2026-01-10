@@ -42,21 +42,21 @@ test.describe('Command + Canvas UI', () => {
     await expect(page.getByTestId('toolbar')).toBeVisible();
     await expect(page.getByTestId('canvas')).toBeVisible();
     await expect(page.getByTestId('action-bar')).toBeVisible();
-    await expect(page.getByTestId('chip-tone')).toBeVisible();
 
-    // Enter a command, run, accept
+    // Enter a command, preview plan, then run
     await page.getByLabel('Command').fill('Summarize PDF');
-    await page.getByText('Run').first().click();
+    await page.getByRole('button', { name: 'Preview plan' }).click();
 
     await expect(page.getByText('Steps')).toBeVisible();
-    const accept = page.getByRole('button', { name: 'Accept' });
     // Grant any surfaced permissions (may be none in stub mode).
     const perms = page.locator('input[type="checkbox"][data-testid^="permission-"]');
     for (let i = 0, n = await perms.count(); i < n; i++) {
       await perms.nth(i).check();
     }
-    await expect(accept).toBeEnabled();
-    await accept.click();
+
+    const runButton = page.getByTestId('plan-drawer').getByRole('button', { name: 'Run' });
+    await expect(runButton).toBeEnabled();
+    await runButton.click();
 
     // Should get stubbed artifact
     await expect(page.getByLabel('Artifact')).toBeVisible();
