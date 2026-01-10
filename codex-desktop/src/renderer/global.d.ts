@@ -13,6 +13,7 @@ declare global {
       importGlobalCodexConfig: () => Promise<{ ok: boolean; path?: string; error?: string }>;
       openConfig: () => Promise<{ ok: boolean; path: string; error?: string | null }>;
       saveApiKey: (key: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
+      verifyApiKey: (key?: string) => Promise<{ ok: boolean; stubMode?: boolean; error?: string }>;
       openMcpDocs?: () => Promise<{ ok: boolean }>; // optional in dev
       pickCwd?: () => Promise<{ ok: boolean; path?: string; canceled?: boolean } | undefined>;
       onStream?: (cb: (chunk: string) => void) => () => void;

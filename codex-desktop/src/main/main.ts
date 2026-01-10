@@ -256,6 +256,31 @@ ipcMain.handle('codex:saveApiKey', async (_e, key: string) => {
   }
 });
 
+ipcMain.handle('codex:verifyApiKey', async (_e, key?: string) => {
+  try {
+    const stubMode = process.env.CODEX_DESKTOP_FORCE_STUB === '1';
+    if (stubMode) return { ok: true, stubMode: true };
+
+    const candidate = typeof key === 'string' && key.trim() ? key.trim() : null;
+    const effectiveKey = candidate || process.env.OPENAI_API_KEY || process.env.CODEX_API_KEY || null;
+    if (!effectiveKey) return { ok: false, error: 'No API key configured' };
+
+    const base = process.env.OPENAI_BASE_URL || 'https://api.openai.com';
+    const modelsUrl = new URL('/v1/models', base).toString();
+    const res = await fetch(modelsUrl, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${effectiveKey}`,
+      },
+    });
+    if (res.ok) return { ok: true };
+    if (res.status === 401) return { ok: false, error: 'Invalid API key (401)' };
+    return { ok: false, error: `Verification failed (${res.status})` };
+  } catch (e: any) {
+    return { ok: false, error: e?.message || String(e) };
+  }
+});
+
 ipcMain.handle('codex:pickCwd', async () => {
   const res = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] });
   if (res.canceled || res.filePaths.length === 0) return { ok: false, canceled: true };

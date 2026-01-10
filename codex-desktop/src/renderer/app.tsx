@@ -4,9 +4,12 @@ import { CommandBar } from './components/CommandBar';
 import { Canvas } from './components/Canvas';
 import { DiffView } from './components/DiffView';
 import { PlanDrawer, type Plan } from './components/PlanDrawer';
+import { PlanReviewModal } from './components/PlanReviewModal';
 import { ActionBar } from './components/ActionBar';
 import { HomeTemplates } from './components/HomeTemplates';
-import { SettingsModal, type Settings } from './components/SettingsModal';
+import { SettingsModal, type Settings, type SettingsTab } from './components/SettingsModal';
+import { SaveAsModal } from './components/SaveAsModal';
+import { ToastHost, type Toast, type ToastKind } from './components/ToastHost';
 
 type DroppedFile = { name: string; path?: string };
 
@@ -37,6 +40,7 @@ function App() {
   const [running, setRunning] = useState(false);
   const [plan, setPlan] = useState<Plan | null>(null);
   const [planOpen, setPlanOpen] = useState(false);
+  const [planReviewOpen, setPlanReviewOpen] = useState(false);
   const [artifact, setArtifact] = useState<{ kind: 'text'; name?: string; content: string } | null>(null);
   const [dropped, setDropped] = useState<DroppedFile[]>([]);
   const [home, setHome] = useState(true);
@@ -46,8 +50,37 @@ function App() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [envInfo, setEnvInfo] = useState<{ envPath?: string; apiKeyPresent?: boolean; apiKeyName?: 'OPENAI_API_KEY'|'CODEX_API_KEY'|null; stubMode?: boolean } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsDefaultTab, setSettingsDefaultTab] = useState<SettingsTab>('general');
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [saveModalOpen, setSaveModalOpen] = useState(false);
+  const [saveSuggestedName, setSaveSuggestedName] = useState('artifact');
+  const [saveBusy, setSaveBusy] = useState(false);
   const runStartedAtRef = React.useRef<number | null>(null);
   const [, setRunningTick] = useState(0);
+
+  const dismissToast = React.useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  const pushToast = React.useCallback(
+    (
+      message: string,
+      kind: ToastKind = 'info',
+      options?: { actionLabel?: string; onAction?: () => void; ttlMs?: number }
+    ) => {
+      const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const toast: Toast = { id, message, kind, actionLabel: options?.actionLabel, onAction: options?.onAction };
+      setToasts((prev) => [...prev, toast]);
+      const ttl = typeof options?.ttlMs === 'number' ? options.ttlMs : kind === 'error' ? 7000 : 4000;
+      window.setTimeout(() => dismissToast(id), ttl);
+    },
+    [dismissToast]
+  );
+
+  const openSettings = React.useCallback((tab: SettingsTab = 'general') => {
+    setSettingsDefaultTab(tab);
+    setSettingsOpen(true);
+  }, []);
 
   const plannedInputsKey = useMemo(() => {
     const fileKey = dropped.map((f) => f.path || f.name).join('|');
@@ -82,15 +115,6 @@ function App() {
         ...prev,
         ...paths.map((p) => ({ name: p.split(/[/\\]/).pop() || p, path: p })),
       ]);
-      // If the user hasn't chosen a workspace yet, default to the first file's folder.
-      if (!settings.workspaceDir && paths[0]) {
-        const dir = paths[0].replace(/[/\\][^/\\]+$/, '');
-        if (dir) {
-          window.codex.updateSettings({ workspaceDir: dir }).then((r) => {
-            if (r.ok && r.settings) setSettings(r.settings);
-          }).catch(() => {});
-        }
-      }
       const first = paths[0];
       const r = await window.codex.readFileText(first);
       if (r.ok && r.text) setSourceText(r.text);
@@ -113,17 +137,8 @@ function App() {
   useEffect(() => {
     setPlan(null);
     setPermissionGrants({});
+    setPlanReviewOpen(false);
   }, [plannedInputsKey]);
-
-  // First-run onboarding: prompt for API key unless stub mode is explicitly enabled.
-  const didAutoOpenSettings = React.useRef(false);
-  useEffect(() => {
-    if (didAutoOpenSettings.current) return;
-    if (envInfo && !envInfo.apiKeyPresent && !envInfo.stubMode) {
-      setSettingsOpen(true);
-      didAutoOpenSettings.current = true;
-    }
-  }, [envInfo]);
 
   const onDropFiles = (files: File[]) => {
     setDropped((prev) => [
@@ -133,14 +148,6 @@ function App() {
     setHome(false);
     const firstPath = files.map((f) => (f as any).path).find(Boolean);
     if (firstPath) {
-      if (!settings.workspaceDir) {
-        const dir = String(firstPath).replace(/[/\\][^/\\]+$/, '');
-        if (dir) {
-          window.codex.updateSettings({ workspaceDir: dir }).then((r) => {
-            if (r.ok && r.settings) setSettings(r.settings);
-          }).catch(() => {});
-        }
-      }
       window.codex.readFileText(firstPath).then((res) => {
         if (res.ok && res.text) setSourceText(res.text);
       }).catch((err) => console.error('Failed to read dropped file', err));
@@ -165,7 +172,7 @@ function App() {
       const next: Record<string, boolean> = {};
       for (const perm of r.plan.permissions) next[perm.id] = false;
       setPermissionGrants(next);
-      setPlanOpen(true);
+      setPlanReviewOpen(true);
     }
   };
 
@@ -174,16 +181,17 @@ function App() {
     const required = plan.permissions.filter((p) => p.required);
     const allGranted = required.every((p) => permissionGrants[p.id]);
     if (!allGranted) {
-      setPlanOpen(true);
-      alert('Review and accept required permissions first.');
+      setPlanReviewOpen(true);
+      pushToast('Review and accept required permissions first.', 'error');
       return;
     }
     if (!envInfo?.apiKeyPresent && !envInfo?.stubMode) {
-      setSettingsOpen(true);
-      alert('Add an API key in Settings to run Codex.');
+      openSettings('connection');
+      pushToast('Add an API key in Settings to run.', 'error');
       return;
     }
     setPlanOpen(false);
+    setPlanReviewOpen(false);
     runStartedAtRef.current = Date.now();
     setRunning(true);
     setArtifact({ kind: 'text', content: '' });
@@ -241,15 +249,8 @@ function App() {
 
   const save = async () => {
     const suggested = (prompt || 'artifact').split(/\r?\n/)[0].slice(0, 80);
-    const name = window.prompt('Save as', suggested) || '';
-    if (!name.trim()) return;
-    const res = await window.codex.saveArtifact({
-      name,
-      kind: 'text',
-      content: artifact?.content || ''
-    });
-    if (!res.ok) alert(`Failed to save: ${res.error}`);
-    else alert(`Saved: ${res.path}`);
+    setSaveSuggestedName(suggested || 'artifact');
+    setSaveModalOpen(true);
   };
 
   const canAcceptWithPermissions = useMemo(() => {
@@ -262,6 +263,7 @@ function App() {
   const canRun = !!plan && canAcceptWithPermissions;
   const canSave = !!artifact?.content;
   const showHome = home && !prompt.trim() && dropped.length === 0 && !artifact?.content;
+  const needsApiKey = !!envInfo && !envInfo.apiKeyPresent && !envInfo.stubMode;
   const runningSeconds =
     running && runStartedAtRef.current != null ? Math.max(0, Math.floor((Date.now() - runStartedAtRef.current) / 1000)) : null;
   const workspaceLabel = settings.workspaceDir
@@ -281,12 +283,12 @@ function App() {
             return;
           }
           if (!canRun) {
-            setPlanOpen(true);
+            setPlanReviewOpen(true);
             return;
           }
           acceptPlan();
         }}
-        primaryLabel={running ? 'Running…' : plan ? (canRun ? 'Run' : 'Review plan') : 'Preview plan'}
+        primaryLabel={running ? 'Running…' : plan ? (canRun ? 'Run' : 'Review plan') : 'Generate plan'}
         primaryDisabled={running || !prompt.trim()}
         primaryBusy={running}
         onDropFiles={onDropFiles}
@@ -326,11 +328,28 @@ function App() {
           {settings.workspaceDir ? (
             <button onClick={() => window.codex.openPath(settings.workspaceDir!)}>Open</button>
           ) : null}
-          <button onClick={() => setSettingsOpen(true)}>Settings</button>
+          <button onClick={() => openSettings('general')}>Settings</button>
         </div>
       </div>
       <div className="content">
-        <Canvas home={showHome} artifact={artifact} running={running}>
+        <Canvas
+          home={showHome}
+          artifact={artifact}
+          running={running}
+          homeContent={
+            showHome && needsApiKey ? (
+              <div className="homeState">
+                <h1>Ensign</h1>
+                <p>Add an API key to run commands.</p>
+                <div className="homeActions">
+                  <button onClick={() => openSettings('connection')}>Add API key</button>
+                  <button onClick={() => void window.codex.openMcpDocs?.()}>MCP guide</button>
+                </div>
+                <p className="homeFootnote">Stored locally on this device.</p>
+              </div>
+            ) : undefined
+          }
+        >
           {showHome && (
             <HomeTemplates onPick={(t) => { setPrompt(t + ' '); }} />
           )}
@@ -356,8 +375,52 @@ function App() {
         onRedo={() => window.codex.redo()}
       />
 
+      <SaveAsModal
+        open={saveModalOpen}
+        suggestedName={saveSuggestedName}
+        busy={saveBusy}
+        onCancel={() => {
+          if (saveBusy) return;
+          setSaveModalOpen(false);
+        }}
+        onSave={async (name) => {
+          setSaveBusy(true);
+          try {
+            const res = await window.codex.saveArtifact({ name, kind: 'text', content: artifact?.content || '' });
+            if (!res.ok) {
+              pushToast(`Failed to save: ${res.error || 'unknown error'}`, 'error');
+              return;
+            }
+            pushToast(`Saved: ${res.path}`, 'success', {
+              actionLabel: 'Open folder',
+              onAction: () => void window.codex.openOutputFolder(),
+              ttlMs: 10_000,
+            });
+            setSaveModalOpen(false);
+          } finally {
+            setSaveBusy(false);
+          }
+        }}
+      />
+
+      <PlanReviewModal
+        open={planReviewOpen}
+        plan={plan}
+        grants={permissionGrants}
+        canRun={canRun}
+        running={running}
+        needsApiKey={!!envInfo && !envInfo.apiKeyPresent && !envInfo.stubMode}
+        onClose={() => setPlanReviewOpen(false)}
+        onOpenSettings={() => openSettings('connection')}
+        onGrantChange={(id, value) => setPermissionGrants((prev) => ({ ...prev, [id]: value }))}
+        onRun={acceptPlan}
+      />
+
+      <ToastHost toasts={toasts} onDismiss={dismissToast} />
+
       <SettingsModal
         open={settingsOpen}
+        defaultTab={settingsDefaultTab}
         settings={settings}
         envInfo={envInfo}
         configPath={status?.configPath ?? null}
@@ -370,15 +433,17 @@ function App() {
         }}
         onSaveSettings={async (patch) => {
           const r = await window.codex.updateSettings(patch);
-          if (!r.ok) alert(`Failed to save settings: ${r.error}`);
+          if (!r.ok) pushToast(`Failed to save settings: ${r.error || 'unknown error'}`, 'error');
           if (r.ok && r.settings) setSettings(r.settings);
           await refreshStatus();
         }}
         onSaveApiKey={async (key) => {
           const r = await window.codex.saveApiKey(key);
-          if (!r.ok) alert(`Failed to save key: ${r.error}`);
+          if (!r.ok) pushToast(`Failed to save key: ${r.error || 'unknown error'}`, 'error');
+          if (r.ok) pushToast('API key saved.', 'success');
           await refreshStatus();
         }}
+        onToast={pushToast}
         onRefresh={refreshStatus}
       />
     </div>
