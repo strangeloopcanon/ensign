@@ -6,10 +6,11 @@ type Props = {
   onPrimaryAction: () => void;
   primaryLabel: string;
   primaryDisabled?: boolean;
+  primaryBusy?: boolean;
   onDropFiles: (files: File[]) => void;
 };
 
-export function CommandBar({ value, onChange, onPrimaryAction, primaryLabel, primaryDisabled, onDropFiles }: Props) {
+export function CommandBar({ value, onChange, onPrimaryAction, primaryLabel, primaryDisabled, primaryBusy, onDropFiles }: Props) {
   const inputRef = React.useRef<HTMLInputElement | null>(null);
 
   React.useEffect(() => {
@@ -38,7 +39,10 @@ export function CommandBar({ value, onChange, onPrimaryAction, primaryLabel, pri
           }}
         />
         <button onClick={onPrimaryAction} disabled={primaryDisabled}>
-          {primaryLabel}
+          <span className="buttonInner">
+            {primaryBusy ? <span className="spinner small" aria-hidden="true" /> : null}
+            <span>{primaryLabel}</span>
+          </span>
         </button>
       </div>
     </div>
