@@ -43,12 +43,12 @@ test.describe('Diff preview', () => {
       await page.getByLabel('Command').fill('Improve this text');
       await page.evaluate((filePath) => window.codex.debugEmitFiles?.([filePath]), tmp);
 
-      await page.getByText('Run').first().click();
+      await page.getByRole('button', { name: 'Preview plan' }).click();
       const perms = page.locator('input[type="checkbox"][data-testid^="permission-"]');
       for (let i = 0, n = await perms.count(); i < n; i++) {
         await perms.nth(i).check();
       }
-      await page.getByRole('button', { name: 'Accept' }).click();
+      await page.getByTestId('plan-drawer').getByRole('button', { name: 'Run' }).click();
 
       await expect(page.getByLabel('Diff')).toBeVisible();
       await expect(page.getByLabel('Diff')).toContainText('Original line');

@@ -1,18 +1,13 @@
 import React from 'react';
 
 type Props = {
-  canAccept: boolean;
   canSave: boolean;
-  running: boolean;
-  onRun: () => void;
-  onAccept: () => void;
-  onEdit: () => void;
   onSave: () => void;
   onUndo: () => void;
   onRedo: () => void;
 };
 
-export function ActionBar({ canAccept, canSave, running, onRun, onAccept, onEdit, onSave, onUndo, onRedo }: Props) {
+export function ActionBar({ canSave, onSave, onUndo, onRedo }: Props) {
   const [canUndo, setCanUndo] = React.useState(false);
   const [canRedo, setCanRedo] = React.useState(false);
 
@@ -33,9 +28,6 @@ export function ActionBar({ canAccept, canSave, running, onRun, onAccept, onEdit
 
   return (
     <div className="actionBar" data-testid="action-bar">
-      <button onClick={onRun} disabled={running}>Run</button>
-      <button onClick={onAccept} disabled={!canAccept}>Accept</button>
-      <button onClick={onEdit}>Edit</button>
       <button onClick={onSave} disabled={!canSave}>Save As</button>
       <div className="spacer" />
       <button onClick={async () => { await onUndo(); refresh(); }} disabled={!canUndo}>Undo</button>

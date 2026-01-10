@@ -8,27 +8,23 @@ export type Plan = {
   sources: string[];
 };
 
-type Status = {
-  mcpNames: string[];
-  configPath: string;
-  configExists: boolean;
-};
-
 type Props = {
   plan?: Plan | null;
   open: boolean;
   onToggle: () => void;
   grants: Record<string, boolean>;
   onGrantChange: (id: string, value: boolean) => void;
-  status?: Status | null;
+  canRun?: boolean;
+  running?: boolean;
+  onRun?: () => void;
 };
 
-export function PlanDrawer({ plan, open, onToggle, grants, onGrantChange, status }: Props) {
+export function PlanDrawer({ plan, open, onToggle, grants, onGrantChange, canRun, running, onRun }: Props) {
   return (
     <aside className={`planDrawer ${open ? 'open' : ''}`} data-testid="plan-drawer">
       <div className="planHeader">
         <strong>Plan</strong>
-        <button onClick={onToggle}>{open ? 'Close' : 'Open'}</button>
+        <button onClick={onToggle}>{open ? 'Close' : 'Plan'}</button>
       </div>
       {open && plan && (
         <div className="planContent">
@@ -63,6 +59,14 @@ export function PlanDrawer({ plan, open, onToggle, grants, onGrantChange, status
               </ul>
             )}
           </div>
+          {typeof onRun === 'function' && (
+            <div className="planFooter">
+              <button onClick={onRun} disabled={!canRun || !!running}>
+                {running ? 'Running…' : 'Run'}
+              </button>
+              {!canRun && <div className="planHint">Check required permissions to run.</div>}
+            </div>
+          )}
           <div>
             <div className="sectionTitle">Sources</div>
             <ul>
@@ -71,23 +75,6 @@ export function PlanDrawer({ plan, open, onToggle, grants, onGrantChange, status
               ))}
             </ul>
           </div>
-          {status && (
-            <div>
-              <div className="sectionTitle">Connectors</div>
-              {status.mcpNames.length ? (
-                <ul>
-                  {status.mcpNames.map((name) => (
-                    <li key={name}>{name}</li>
-                  ))}
-                </ul>
-              ) : (
-                <div>No MCP connectors configured. Use `codex mcp add` in the Codex CLI.</div>
-              )}
-              <div className="configHint">
-                {status.configExists ? `Config: ${status.configPath}` : `Config missing: ${status.configPath}`}
-              </div>
-            </div>
-          )}
         </div>
       )}
     </aside>

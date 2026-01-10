@@ -13,6 +13,15 @@ export type AppSettings = {
   includeFileContents: boolean;
 };
 
+function defaultWorkspaceDir(): string | null {
+  try {
+    const p = app.getPath('downloads');
+    return typeof p === 'string' && p.length ? p : null;
+  } catch {
+    return null;
+  }
+}
+
 const DEFAULT_SETTINGS: AppSettings = {
   workspaceDir: null,
   outputDir: null,
@@ -29,7 +38,7 @@ function settingsPath(): string {
 export function readSettings(): AppSettings {
   try {
     const p = settingsPath();
-    if (!fs.existsSync(p)) return { ...DEFAULT_SETTINGS };
+    if (!fs.existsSync(p)) return { ...DEFAULT_SETTINGS, workspaceDir: defaultWorkspaceDir() };
     const raw = fs.readFileSync(p, 'utf8');
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') return { ...DEFAULT_SETTINGS };

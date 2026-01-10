@@ -19,7 +19,7 @@ body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; marg
 .badge { border-radius: 999px; border: 1px solid #4443; padding: 3px 10px; font-size: 12px; background: color-mix(in srgb, Canvas 85%, CanvasText 15%); }
 
 /* Middle area: canvas + plan drawer */
-.content { display: grid; grid-template-columns: 1fr 280px; height: 100%; }
+.content { display: grid; grid-template-columns: 1fr auto; height: 100%; }
 .canvas { position: relative; overflow: auto; padding: 12px; }
 .artifact { white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .homeState { height: 100%; display: grid; place-content: center; text-align: center; opacity: 0.9; }
@@ -27,13 +27,19 @@ body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; marg
 .templateTile { padding: 12px; border: 1px solid #4443; border-radius: 10px; text-align: left; }
 .diffView { margin-top: 12px; padding-top: 8px; border-top: 1px dashed #4443; }
 
-.planDrawer { border-left: 1px solid #4443; overflow: auto; padding: 8px 12px; }
+.planDrawer { border-left: 1px solid #4443; overflow: auto; padding: 8px 12px; width: 280px; transition: width 120ms ease, padding 120ms ease; }
+.planDrawer:not(.open) { width: 56px; padding: 8px 6px; overflow: hidden; }
+.planDrawer:not(.open) .planHeader { justify-content: flex-end; }
+.planDrawer:not(.open) .planHeader strong { display: none; }
+.planDrawer:not(.open) .planHeader button { width: 100%; }
+.planDrawer:not(.open) .planContent { display: none; }
 .planHeader { display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; background: color-mix(in lch, Canvas, CanvasText 2%); padding: 8px 0; }
 .planContent { font-size: 13px; }
 .sectionTitle { font-weight: 600; margin: 10px 0 4px; }
 .permissionList { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
 .permissionItem { display: flex; gap: 8px; align-items: center; }
-.configHint { margin-top: 6px; font-size: 12px; color: color-mix(in srgb, CanvasText 70%, Canvas 30%); }
+.planFooter { margin: 10px 0; padding: 10px; border: 1px solid #4443; border-radius: 12px; background: color-mix(in srgb, Canvas 85%, CanvasText 15%); }
+.planHint { margin-top: 6px; font-size: 12px; opacity: 0.8; }
 
 /* Action bar */
 .actionBar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-top: 1px solid #4443; }
@@ -48,6 +54,7 @@ button { padding: 6px 10px; }
 .modalHeader { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; position: sticky; top: 0; background: color-mix(in lch, Canvas, CanvasText 2%); border-bottom: 1px solid #4443; }
 .modalBody { padding: 12px; display: grid; gap: 12px; }
 .settingsGroup { border: 1px solid #4443; border-radius: 12px; padding: 10px; }
+.settingsSummary { cursor: pointer; font-weight: 600; }
 .settingsRow { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; }
 .settingsLabel { font-weight: 600; }
 .settingsValue { font-size: 12px; opacity: 0.8; margin-top: 2px; }

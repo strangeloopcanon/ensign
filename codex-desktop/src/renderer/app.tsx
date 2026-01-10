@@ -6,10 +6,22 @@ import { DiffView } from './components/DiffView';
 import { PlanDrawer, type Plan } from './components/PlanDrawer';
 import { ActionBar } from './components/ActionBar';
 import { HomeTemplates } from './components/HomeTemplates';
-import { ClarificationChips } from './components/ClarificationChips';
 import { SettingsModal, type Settings } from './components/SettingsModal';
 
 type DroppedFile = { name: string; path?: string };
+
+function abbreviatePath(p: string): string {
+  // Light abbreviation for display only.
+  return p
+    .replace(/^\/Users\/[^/]+/, '~')
+    .replace(/^([A-Za-z]:)\\Users\\[^\\]+/i, '$1\\~');
+}
+
+function truncateMiddle(s: string, max: number): string {
+  if (s.length <= max) return s;
+  const keep = Math.max(10, Math.floor((max - 1) / 2));
+  return `${s.slice(0, keep)}…${s.slice(-keep)}`;
+}
 
 const DEFAULT_SETTINGS: Settings = {
   workspaceDir: null,
@@ -24,7 +36,7 @@ function App() {
   const [prompt, setPrompt] = useState('');
   const [running, setRunning] = useState(false);
   const [plan, setPlan] = useState<Plan | null>(null);
-  const [planOpen, setPlanOpen] = useState(true);
+  const [planOpen, setPlanOpen] = useState(false);
   const [artifact, setArtifact] = useState<{ kind: 'text'; name?: string; content: string } | null>(null);
   const [dropped, setDropped] = useState<DroppedFile[]>([]);
   const [home, setHome] = useState(true);
@@ -34,16 +46,17 @@ function App() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [envInfo, setEnvInfo] = useState<{ envPath?: string; apiKeyPresent?: boolean; apiKeyName?: 'OPENAI_API_KEY'|'CODEX_API_KEY'|null; stubMode?: boolean } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const clarificationChips = useMemo(
-    () => [
-      { id: 'tone', label: 'Tone?', text: 'tone: friendly' },
-      { id: 'length', label: 'Length?', text: 'limit to two paragraphs' },
-      { id: 'target', label: 'Target app?', text: 'target app: Keynote' },
-      { id: 'format', label: 'Format?', text: 'output as a bullet list' },
-      { id: 'language', label: 'Language?', text: 'write in Spanish' },
-    ],
-    []
-  );
+
+  const plannedInputsKey = useMemo(() => {
+    const fileKey = dropped.map((f) => f.path || f.name).join('|');
+    return JSON.stringify({
+      prompt: prompt.trim(),
+      fileKey,
+      cwd: settings.workspaceDir,
+      sandboxMode: settings.sandboxMode,
+      modelOverride: settings.modelOverride,
+    });
+  }, [dropped, prompt, settings.modelOverride, settings.sandboxMode, settings.workspaceDir]);
 
   const refreshStatus = React.useCallback(async () => {
     const [s, e, st] = await Promise.allSettled([
@@ -87,6 +100,12 @@ function App() {
       try { unsubFiles && unsubFiles(); } catch {}
     };
   }, [refreshStatus, settings.workspaceDir]);
+
+  // If inputs change after a plan is generated, force a new preview to avoid running with a stale plan.
+  useEffect(() => {
+    setPlan(null);
+    setPermissionGrants({});
+  }, [plannedInputsKey]);
 
   // First-run onboarding: prompt for API key unless stub mode is explicitly enabled.
   const didAutoOpenSettings = React.useRef(false);
@@ -138,6 +157,7 @@ function App() {
       const next: Record<string, boolean> = {};
       for (const perm of r.plan.permissions) next[perm.id] = false;
       setPermissionGrants(next);
+      setPlanOpen(true);
     }
   };
 
@@ -146,6 +166,7 @@ function App() {
     const required = plan.permissions.filter((p) => p.required);
     const allGranted = required.every((p) => permissionGrants[p.id]);
     if (!allGranted) {
+      setPlanOpen(true);
       alert('Review and accept required permissions first.');
       return;
     }
@@ -154,6 +175,7 @@ function App() {
       alert('Add an API key in Settings to run Codex.');
       return;
     }
+    setPlanOpen(false);
     setRunning(true);
     setArtifact({ kind: 'text', content: '' });
     let streamed = '';
@@ -224,33 +246,42 @@ function App() {
       .filter((p) => p.required)
       .every((p) => permissionGrants[p.id]);
   }, [envInfo, plan, permissionGrants, prompt]);
+  const canRun = !!plan && canAcceptWithPermissions;
   const canSave = !!artifact?.content;
+  const showHome = home && !prompt.trim() && dropped.length === 0 && !artifact?.content;
+  const workspaceLabel = settings.workspaceDir
+    ? truncateMiddle(abbreviatePath(settings.workspaceDir), 44)
+    : 'not set';
 
   return (
     <div id="app" style={{ display: 'contents' }}>
       <CommandBar
         value={prompt}
         onChange={setPrompt}
-        onRun={runPlan}
+        onPrimaryAction={() => {
+          if (running) return;
+          if (!prompt.trim()) return;
+          if (!plan) {
+            runPlan();
+            return;
+          }
+          if (!canRun) {
+            setPlanOpen(true);
+            return;
+          }
+          acceptPlan();
+        }}
+        primaryLabel={plan ? (canRun ? 'Run' : 'Review plan') : 'Preview plan'}
+        primaryDisabled={running || !prompt.trim()}
         onDropFiles={onDropFiles}
-        chips={(
-          <ClarificationChips
-            chips={clarificationChips}
-            onPick={(chip) => {
-              setPrompt((prev) => {
-                if (prev.includes(chip.text)) return prev;
-                const spacer = prev.trim().length ? ' ' : '';
-                return prev + spacer + chip.text;
-              });
-            }}
-          />
-        )}
       />
       <div className="toolbar" data-testid="toolbar">
         <div className="toolbarLeft">
-          <span className="badge">{settings.workspaceDir ? `workspace: ${settings.workspaceDir}` : 'workspace: none'}</span>
+          <span className="badge" title={settings.workspaceDir || ''}>
+            {`folder: ${workspaceLabel}`}
+          </span>
           <span className="badge">
-            {`model: ${settings.modelOverride || status?.model || 'default'}`}
+            {`default model: ${settings.modelOverride || status?.model || 'default'}`}
           </span>
           <span className="badge">
             {envInfo?.stubMode ? 'LLM: stub' : envInfo?.apiKeyPresent ? 'LLM: ready' : 'LLM: needs key'}
@@ -266,17 +297,17 @@ function App() {
               if (r.ok && r.settings) setSettings(r.settings);
             }}
           >
-            Choose folder…
+            {settings.workspaceDir ? 'Change folder…' : 'Choose folder…'}
           </button>
-          <button disabled={!settings.workspaceDir} onClick={() => settings.workspaceDir && window.codex.openPath(settings.workspaceDir)}>
-            Open folder
-          </button>
+          {settings.workspaceDir ? (
+            <button onClick={() => window.codex.openPath(settings.workspaceDir!)}>Open</button>
+          ) : null}
           <button onClick={() => setSettingsOpen(true)}>Settings</button>
         </div>
       </div>
       <div className="content">
-        <Canvas home={home} artifact={artifact}>
-          {home && (
+        <Canvas home={showHome} artifact={artifact}>
+          {showHome && (
             <HomeTemplates onPick={(t) => { setPrompt(t + ' '); }} />
           )}
           {!!artifact?.content && !!sourceText && (
@@ -289,19 +320,13 @@ function App() {
           onToggle={() => setPlanOpen((v) => !v)}
           grants={permissionGrants}
           onGrantChange={(id, value) => setPermissionGrants((prev) => ({ ...prev, [id]: value }))}
-          status={status}
+          canRun={canRun}
+          running={running}
+          onRun={acceptPlan}
         />
       </div>
       <ActionBar
-        canAccept={canAcceptWithPermissions}
         canSave={canSave}
-        running={running}
-        onRun={runPlan}
-        onAccept={acceptPlan}
-        onEdit={() => {
-          setPlan(null);
-          setPermissionGrants({});
-        }}
         onSave={save}
         onUndo={() => window.codex.undo()}
         onRedo={() => window.codex.redo()}

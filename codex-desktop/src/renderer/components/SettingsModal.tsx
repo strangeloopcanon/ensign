@@ -72,7 +72,7 @@ export function SettingsModal({
           <div className="settingsGroup">
             <div className="settingsRow">
               <div>
-                <div className="settingsLabel">Workspace folder</div>
+                <div className="settingsLabel">Folder to work in</div>
                 <div className="settingsValue">{settings.workspaceDir || 'Not set'}</div>
               </div>
               <div className="settingsActions">
@@ -167,14 +167,14 @@ export function SettingsModal({
           <div className="settingsGroup">
             <div className="settingsRow">
               <div>
-                <div className="settingsLabel">Model override</div>
-                <div className="settingsValue">Leave blank to use Codex config/default.</div>
+                <div className="settingsLabel">Default model</div>
+                <div className="settingsValue">Used for runs. Clear to use Codex config/default.</div>
               </div>
               <div className="settingsActions">
                 <input
                   className="settingsInput"
                   value={settings.modelOverride || ''}
-                  placeholder="e.g. gpt-4.1-mini"
+                  placeholder="e.g. gpt-5.2"
                   onChange={(e) => void onSaveSettings({ modelOverride: e.target.value || null })}
                 />
                 <button disabled={busy || !settings.modelOverride} onClick={() => void onSaveSettings({ modelOverride: null })}>
@@ -187,8 +187,8 @@ export function SettingsModal({
           <div className="settingsGroup">
             <div className="settingsRow">
               <div>
-                <div className="settingsLabel">Sandbox mode</div>
-                <div className="settingsValue">Controls whether Codex may write to the workspace.</div>
+                <div className="settingsLabel">Permissions</div>
+                <div className="settingsValue">Controls what Ensign may do in your folder.</div>
               </div>
               <div className="settingsActions">
                 <select
@@ -196,9 +196,9 @@ export function SettingsModal({
                   value={settings.sandboxMode}
                   onChange={(e) => void onSaveSettings({ sandboxMode: e.target.value as SandboxMode })}
                 >
-                  <option value="read-only">read-only (safest)</option>
-                  <option value="workspace-write">workspace-write</option>
-                  <option value="danger-full-access">danger-full-access</option>
+                  <option value="read-only">Read-only (safest)</option>
+                  <option value="workspace-write">Write workspace</option>
+                  <option value="danger-full-access">Full access</option>
                 </select>
               </div>
             </div>
@@ -241,8 +241,9 @@ export function SettingsModal({
             </div>
           </div>
 
-          <div className="settingsGroup">
-            <div className="settingsRow">
+          <details className="settingsGroup">
+            <summary className="settingsSummary">Advanced</summary>
+            <div className="settingsRow" style={{ marginTop: 10 }}>
               <div>
                 <div className="settingsLabel">Codex config</div>
                 <div className="settingsValue">
@@ -294,7 +295,7 @@ export function SettingsModal({
                 <button onClick={() => window.codex.openMcpDocs?.()}>MCP guide</button>
               </div>
             </div>
-          </div>
+          </details>
         </div>
       </div>
     </div>
