@@ -1,7 +1,7 @@
 {
   "name": "codex-desktop",
   "version": "1.0.0",
-  "description": "Minimal Codex desktop wrapper",
+  "description": "Ensign: command-first desktop app for running a Codex agent against a folder",
   "main": "build/main/main.js",
   "scripts": {
     "prestart": "npm run build:main",
@@ -20,10 +20,10 @@
   },
   "keywords": [],
   "author": {
-    "name": "Codex Desktop Team",
-    "email": "support@codex.local"
+    "name": "Ensign Team",
+    "email": "support@ensign.local"
   },
-  "homepage": "https://codex.local/desktop",
+  "homepage": "https://github.com/strangeloopcanon/ensign",
   "license": "ISC",
   "dependencies": {
     "@openai/codex-sdk": "^0.46.0",

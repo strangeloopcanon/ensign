@@ -1,16 +1,16 @@
-# Ensign (Codex Desktop)
+# Ensign
 
-Command-first Electron app that wraps the Codex CLI/SDK with a single-screen "Command + Canvas" experience. Type or drop a task, review the dry-run plan, grant permissions, then accept to generate the artifact. Deterministic outputs are versioned to an `AI Output` folder and saves are undoable.
+Command-first Electron app that wraps the Codex CLI/SDK with a single-screen "Command + Canvas" experience. Type a task (and optionally drop files), review the dry-run plan, grant permissions, then run to generate the artifact. Deterministic outputs are versioned to an `AI Output` folder and saves are undoable.
 
 ## Install & Use (Packaged App)
 If you have a packaged build, distribute the `.dmg` (it contains the `.app`).
 
 1. Open the `.dmg` → drag the app into **Applications**.
 2. Launch the app from **Applications**.
-3. First launch opens **Settings** to paste an API key (each user enters their own key).
-4. Choose a **Workspace folder** in **Settings** (or drag a file into the window to auto-set it).
-5. Type a task → review the plan → check required permissions → **Accept** to run.
-6. Use **Save** to write outputs into `~/Documents/AI Output/` (or your Settings override).
+3. If no key is configured, the home screen shows **Add API key**. Paste your key in **Settings → Connection** (each user enters their own key).
+4. (Optional) Choose a folder to work in (defaults to **Downloads**).
+5. Type a task → **Generate plan** → review the **Execution plan** → check required permissions → **Run**.
+6. Use **Save As** to write outputs into `~/Documents/AI Output/` (or your Settings override).
 
 ## Developer Quick Start
 1. **Install deps**
@@ -19,7 +19,7 @@ If you have a packaged build, distribute the `.dmg` (it contains the `.app`).
    npm install
    ```
 2. **Configure API key**
-   - On first launch, Codex Desktop prompts for a key. Paste it into **Settings** (stored in the app’s `.env`).
+   - On first launch, Ensign prompts for a key. Paste it into **Settings → Connection** (stored in the app’s `.env`).
    - Or set `OPENAI_API_KEY` (or `CODEX_API_KEY`) in a local `.env`:
      - `codex-desktop/.env` (preferred when running from `codex-desktop/`)
      - repo root `.env` (also supported in dev)
@@ -59,20 +59,20 @@ If you have a packaged build, distribute the `.dmg` (it contains the `.app`).
 Artifacts land in `release/` and the runnable unpacked apps live under `release/<platform>-unpacked/`.
 
 ## Command + Canvas UX
-- **Command bar** accepts text, drag-and-drop files, and provides inline chips (tone, length, target app, etc.).
-- **Toolbar** shows workspace/model/LLM readiness and provides quick access to folder selection + Settings.
-- **Plan drawer** shows the dry-run plan, detected permissions (files, network, MCP connectors), sources, and current Codex config location. Required items must be checked before **Accept** enables.
+- **Command bar** accepts text and drag-and-drop files.
+- **Toolbar** shows folder/model/LLM readiness and provides quick access to folder selection + Settings.
+- **Execution plan** modal shows the dry-run plan, detected permissions (files, network, MCP connectors), and sources. Required items must be checked before **Run** enables.
 - **Canvas** renders the working artifact; when a source file is provided the diff view highlights changes line-by-line.
-- **Action bar** provides Run/Accept/Edit/Save/Undo/Redo. Saves are versioned under `~/Documents/AI Output/`.
+- **Action bar** provides Save As / Undo / Redo. Saves are versioned under `~/Documents/AI Output/`.
 
 ## OS Hooks
 - Global hotkey `Cmd/Ctrl+Shift+K` seeds the command bar with the current clipboard.
 - Drag files onto the dock icon or window (or use Finder “Open With”) to populate sources and enable diff previews.
-- The packaged build handles `open-file` and second-instance launches so right-click “Open With Codex Desktop” works.
+- The packaged build handles `open-file` and second-instance launches so right-click “Open With Ensign” works.
 
 ## MCP Connectors & Permissions
-- Codex Desktop does **not** ship its own connectors. It reuses whatever the Codex CLI exposes in `~/.codex/config.toml`.
-- When you run `codex mcp add <connector>`, the connector name appears in the Plan drawer.
+- Ensign does **not** ship its own connectors. It reuses whatever the Codex CLI exposes in `~/.codex/config.toml`.
+- When you run `codex mcp add <connector>`, the connector name appears in the Execution plan.
 - Heuristics mark mail/calendar connectors as *required* when the prompt clearly asks for those actions (`email`, `meeting`, `schedule`, etc.). You must explicitly grant them before running.
 - Optional connectors stay unchecked; toggle them to document consent when you know the task needs them.
 
@@ -92,7 +92,7 @@ npm test
 ```
 The suite runs serially (single-instance Electron) and covers:
 - App boot in production mode.
-- Plan gating + Accept flow.
+- Plan review + Run flow.
 - Diff preview with a test file.
 - Deterministic save, undo, and redo.
 
@@ -100,7 +100,7 @@ The suite runs serially (single-instance Electron) and covers:
 Every saved artifact is recorded in a transaction log under Electron’s `userData` directory (typically `~/Library/Application Support/<App Name>/transactions/` on macOS). Undo temporarily moves files into a private trash folder; Redo restores them. Versioned filenames (`<name> (1).txt`, etc.) prevent accidental overwrites.
 
 ## Limitations & Next Steps
-- Permission heuristics are intentionally conservative. If a task implicitly needs another connector, toggle it manually before accepting.
+- Permission heuristics are intentionally conservative. If a task implicitly needs another connector, toggle it manually before running.
 - Non-text diffs (PDF, DOCX) are presented as generated text today. Planned work includes richer previews per MIME type.
 - Automation shortcuts and Quick Actions are stubbed at the OS level; wiring them through macOS Shortcuts and Windows Context actions is tracked separately.
 
