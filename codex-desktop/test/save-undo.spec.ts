@@ -37,12 +37,14 @@ test.describe('Save / Undo / Redo', () => {
     page = await app.firstWindow();
 
     await page.getByLabel('Command').fill('make a short note');
-    await page.getByRole('button', { name: 'Preview plan' }).click();
-    const perms = page.locator('input[type="checkbox"][data-testid^="permission-"]');
+    await page.getByRole('button', { name: 'Generate plan' }).click();
+    const planDialog = page.getByRole('dialog', { name: 'Execution plan' });
+    await expect(planDialog).toBeVisible();
+    const perms = planDialog.locator('input[type="checkbox"][data-testid^="permission-"]');
     for (let i = 0, n = await perms.count(); i < n; i++) {
       await perms.nth(i).check();
     }
-    await page.getByTestId('plan-drawer').getByRole('button', { name: 'Run' }).click();
+    await planDialog.getByRole('button', { name: 'Run' }).click();
 
     // Save artifact
     const res = await page.evaluate(() => window.codex.saveArtifact({ name: 'test-artifact', kind: 'text', content: 'hello' }));

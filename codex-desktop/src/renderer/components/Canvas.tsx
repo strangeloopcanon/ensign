@@ -10,16 +10,22 @@ type Props = {
   home: boolean;
   artifact?: Artifact | null;
   running?: boolean;
+  homeContent?: React.ReactNode;
   children?: React.ReactNode; // for overlays like diffs later
 };
 
-export function Canvas({ home, artifact, running, children }: Props) {
+export function Canvas({ home, artifact, running, homeContent, children }: Props) {
   return (
     <div className="canvas" data-testid="canvas">
       {home && !artifact ? (
-        <div className="homeState">
-          <h1>Codex</h1>
-          <p>Command + Canvas. One shot by default.</p>
+        <div className="homeLayout">
+          {homeContent ?? (
+            <div className="homeState">
+              <h1>Ensign</h1>
+              <p>Run an agent against a folder.</p>
+            </div>
+          )}
+          {children}
         </div>
       ) : artifact ? (
         artifact.content ? (
@@ -42,7 +48,7 @@ export function Canvas({ home, artifact, running, children }: Props) {
       ) : (
         <div className="placeholder">No artifact yet</div>
       )}
-      {children}
+      {!home ? children : null}
     </div>
   );
 }

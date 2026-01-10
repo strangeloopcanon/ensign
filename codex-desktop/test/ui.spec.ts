@@ -45,16 +45,18 @@ test.describe('Command + Canvas UI', () => {
 
     // Enter a command, preview plan, then run
     await page.getByLabel('Command').fill('Summarize PDF');
-    await page.getByRole('button', { name: 'Preview plan' }).click();
+    await page.getByRole('button', { name: 'Generate plan' }).click();
 
-    await expect(page.getByText('Steps')).toBeVisible();
+    const planDialog = page.getByRole('dialog', { name: 'Execution plan' });
+    await expect(planDialog).toBeVisible();
+    await expect(planDialog.getByText('Steps')).toBeVisible();
     // Grant any surfaced permissions (may be none in stub mode).
-    const perms = page.locator('input[type="checkbox"][data-testid^="permission-"]');
+    const perms = planDialog.locator('input[type="checkbox"][data-testid^="permission-"]');
     for (let i = 0, n = await perms.count(); i < n; i++) {
       await perms.nth(i).check();
     }
 
-    const runButton = page.getByTestId('plan-drawer').getByRole('button', { name: 'Run' });
+    const runButton = planDialog.getByRole('button', { name: 'Run' });
     await expect(runButton).toBeEnabled();
     await runButton.click();
 

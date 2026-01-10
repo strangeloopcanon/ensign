@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('codex', {
   openConfig: () => ipcRenderer.invoke('codex:openConfig'),
   openMcpDocs: () => ipcRenderer.invoke('codex:openMcpDocs'),
   saveApiKey: (key: string) => ipcRenderer.invoke('codex:saveApiKey', key),
+  verifyApiKey: (key?: string) => ipcRenderer.invoke('codex:verifyApiKey', key),
   pickCwd: () => ipcRenderer.invoke('codex:pickCwd'),
   saveArtifact: (payload: { name: string; kind: 'text'; content: string }) => ipcRenderer.invoke('codex:saveArtifact', payload),
   openOutputFolder: () => ipcRenderer.invoke('codex:openOutputFolder'),

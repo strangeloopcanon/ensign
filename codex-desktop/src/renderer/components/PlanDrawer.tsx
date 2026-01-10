@@ -23,7 +23,7 @@ export function PlanDrawer({ plan, open, onToggle, grants, onGrantChange, canRun
   return (
     <aside className={`planDrawer ${open ? 'open' : ''}`} data-testid="plan-drawer">
       <div className="planHeader">
-        <strong>Plan</strong>
+        <strong>Execution plan</strong>
         <button onClick={onToggle}>{open ? 'Close' : 'Plan'}</button>
       </div>
       {open && plan && (
