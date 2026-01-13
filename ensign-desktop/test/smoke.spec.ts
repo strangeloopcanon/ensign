@@ -15,15 +15,15 @@ test('electron boots in prod and opens a window', async () => {
   childProcess.execSync('npm run build:main', { cwd, stdio: 'inherit' });
   childProcess.execSync('npm run build:renderer', { cwd, stdio: 'inherit' });
 
-  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-desktop-test-'));
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ensign-desktop-test-'));
   const app = await electron.launch({
     args: ['.'],
     cwd,
     env: {
       ...process.env,
       NODE_ENV: 'production',
-      CODEX_DESKTOP_FORCE_STUB: '1',
-      CODEX_DESKTOP_USER_DATA: userDataDir,
+      ENSIGN_DESKTOP_FORCE_STUB: '1',
+      ENSIGN_DESKTOP_USER_DATA: userDataDir,
     },
   });
   const win = await app.firstWindow();

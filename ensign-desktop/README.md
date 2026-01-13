@@ -15,13 +15,13 @@ If you have a packaged build, distribute the `.dmg` (it contains the `.app`).
 ## Developer Quick Start
 1. **Install deps**
    ```bash
-   cd codex-desktop
+   cd ensign-desktop
    npm install
    ```
 2. **Configure API key**
    - On first launch, Ensign prompts for a key. Paste it into **Settings → Connection** (stored in the app’s `.env`).
    - Or set `OPENAI_API_KEY` (or `CODEX_API_KEY`) in a local `.env`:
-     - `codex-desktop/.env` (preferred when running from `codex-desktop/`)
+     - `ensign-desktop/.env` (preferred when running from `ensign-desktop/`)
      - repo root `.env` (also supported in dev)
 3. **(Optional) Configure Codex config + MCP connectors**
    - By default the app keeps its own Codex config under its app data directory (no manual copying).
@@ -84,7 +84,7 @@ Artifacts land in `release/` and the runnable unpacked apps live under `release/
 - The app surfaces the effective config path and whether it exists. Use **Settings → Codex config → Open** to edit it.
 
 ## Stub mode
-Set `CODEX_DESKTOP_FORCE_STUB=1` to run in deterministic stub mode (no network/model calls). This is mainly for UI testing and demos.
+Set `ENSIGN_DESKTOP_FORCE_STUB=1` to run in deterministic stub mode (no network/model calls). This is mainly for UI testing and demos.
 
 ## Skills (prompt packs)
 Ensign supports lightweight “skills” that act as instruction packs injected into the task prompt.
@@ -142,7 +142,7 @@ xcode-select --install
 
 3) Build
 ```bash
-cd codex-desktop
+cd ensign-desktop
 # auto‑discover signing identity from Keychain, notarize with env
 npm run build:mac:signed
 ```

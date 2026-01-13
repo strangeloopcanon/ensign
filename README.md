@@ -6,4 +6,4 @@ Ensign is a command‑first desktop app for running a Codex agent against a fold
 - Use the `.dmg` (it contains the `.app`). Open the DMG → drag the app into **Applications** → launch.
 - On first launch, Ensign shows a welcome screen if no API key is configured. Click **Add API key** and paste your OpenAI key; it’s stored locally on that device.
 
-Developer docs live at `codex-desktop/README.md`.
+Developer docs live at `ensign-desktop/README.md`.

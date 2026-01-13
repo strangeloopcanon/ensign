@@ -43,7 +43,7 @@ async function importCodexSdk(): Promise<CodexSdk | null> {
 
 async function ensureClient(): Promise<CodexClient | null> {
   if (codexClient) return codexClient;
-  if (process.env.CODEX_DESKTOP_FORCE_STUB === '1') return null;
+  if (process.env.ENSIGN_DESKTOP_FORCE_STUB === '1' || process.env.CODEX_DESKTOP_FORCE_STUB === '1') return null;
   const apiKey = getApiKey();
   if (!apiKey) return null;
 
