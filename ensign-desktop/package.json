@@ -1,5 +1,5 @@
 {
-  "name": "codex-desktop",
+  "name": "ensign-desktop",
   "version": "1.0.0",
   "description": "Ensign: command-first desktop app for running a Codex agent against a folder",
   "main": "build/main/main.js",

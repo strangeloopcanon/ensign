@@ -22,20 +22,20 @@ jobs:
           node-version: '18'
       - name: Install dependencies
         run: |
-          cd codex-desktop
+          cd ensign-desktop
           npm ci
       - name: Build (signed + notarized)
         if: ${{ env.APPLE_ID != '' && env.APPLE_APP_SPECIFIC_PASSWORD != '' && env.APPLE_TEAM_ID != '' && env.CSC_LINK != '' && env.CSC_KEY_PASSWORD != '' }}
         run: |
-          cd codex-desktop
+          cd ensign-desktop
           npm run build:mac:signed
       - name: Build (unsigned fallback)
         if: ${{ !(env.APPLE_ID != '' && env.APPLE_APP_SPECIFIC_PASSWORD != '' && env.APPLE_TEAM_ID != '' && env.CSC_LINK != '' && env.CSC_KEY_PASSWORD != '' ) }}
         run: |
-          cd codex-desktop
+          cd ensign-desktop
           npm run build:mac
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
         with:
-          name: codex-desktop-dmg
-          path: codex-desktop/release/*.dmg
+          name: ensign-desktop-dmg
+          path: ensign-desktop/release/*.dmg

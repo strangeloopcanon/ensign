@@ -4,21 +4,21 @@ SHELL := /bin/bash
 AGENT_MODE ?= baseline
 
 setup:
-	cd codex-desktop && npm ci
+	cd ensign-desktop && npm ci
 
 check:
-	cd codex-desktop && npm run build:main
-	cd codex-desktop && npm run build:renderer
+	cd ensign-desktop && npm run build:main
+	cd ensign-desktop && npm run build:renderer
 
 test:
-	cd codex-desktop && npm test
+	cd ensign-desktop && npm test
 
 llm-live:
 	@echo "llm-live: N/A (no goldens configured)"
 
 deps-audit:
 	@echo "deps-audit (mode=$(AGENT_MODE))"
-	@cd codex-desktop && npm audit --audit-level=high || ( \
+	@cd ensign-desktop && npm audit --audit-level=high || ( \
 		if [ "$(AGENT_MODE)" = "production" ]; then \
 			echo "npm audit failed (blocking in production)"; exit 1; \
 		else \

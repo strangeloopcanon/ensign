@@ -13,10 +13,10 @@ test-results/
 .vscode/
 
 # Project outputs
-codex-desktop/build/
-codex-desktop/release/
-codex-desktop/node_modules/
-codex-desktop/test-results/
+ensign-desktop/build/
+ensign-desktop/release/
+ensign-desktop/node_modules/
+ensign-desktop/test-results/
 
 # OS junk
 Thumbs.db

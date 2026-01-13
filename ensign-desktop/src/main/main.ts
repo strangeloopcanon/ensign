@@ -18,7 +18,11 @@ let cachedEnvPath: string | null = null;
 const originalCodexHome = process.env.CODEX_HOME;
 const tasks = new TaskManager();
 
-const userDataOverride = process.env.CODEX_DESKTOP_USER_DATA;
+function isStubMode(): boolean {
+  return process.env.ENSIGN_DESKTOP_FORCE_STUB === '1' || process.env.CODEX_DESKTOP_FORCE_STUB === '1';
+}
+
+const userDataOverride = process.env.ENSIGN_DESKTOP_USER_DATA || process.env.CODEX_DESKTOP_USER_DATA;
 if (userDataOverride) {
   try {
     app.setPath('userData', path.resolve(userDataOverride));
@@ -500,7 +504,7 @@ ipcMain.handle('codex:saveApiKey', async (_e, key: string) => {
 
 ipcMain.handle('codex:verifyApiKey', async (_e, key?: string) => {
   try {
-    const stubMode = process.env.CODEX_DESKTOP_FORCE_STUB === '1';
+    const stubMode = isStubMode();
     if (stubMode) return { ok: true, stubMode: true };
 
     const candidate = typeof key === 'string' && key.trim() ? key.trim() : null;
@@ -539,7 +543,7 @@ ipcMain.handle('codex:getEnvInfo', async () => {
   } else if (codexKey) {
     apiKeyName = 'CODEX_API_KEY';
   }
-  const stubMode = process.env.CODEX_DESKTOP_FORCE_STUB === '1';
+  const stubMode = isStubMode();
   return { ok: true, envPath: resolveEnvPath(), apiKeyPresent, apiKeyName, stubMode };
 });
 
@@ -630,7 +634,7 @@ ipcMain.handle(
     }
   ) => {
   const files = payload?.files || [];
-  const stubMode = process.env.CODEX_DESKTOP_FORCE_STUB === '1';
+  const stubMode = isStubMode();
   const apiKeyPresent = getApiKeyPresent();
   const saved = readSettings();
   let cwd = payload?.cwd;
