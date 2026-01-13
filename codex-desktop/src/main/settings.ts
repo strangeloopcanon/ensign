@@ -11,6 +11,12 @@ export type AppSettings = {
   codexHomeMode: 'app' | 'global';
   sandboxMode: SandboxMode;
   includeFileContents: boolean;
+  allowOutsideWorkspaceRead: boolean;
+  taskConcurrency: number;
+  experimentalSearch: boolean;
+  experimentalPlanTool: boolean;
+  experimentalConfigOverrides: string[];
+  selectedSkills: string[];
 };
 
 function defaultWorkspaceDir(): string | null {
@@ -29,6 +35,12 @@ const DEFAULT_SETTINGS: AppSettings = {
   codexHomeMode: 'app',
   sandboxMode: 'read-only',
   includeFileContents: true,
+  allowOutsideWorkspaceRead: false,
+  taskConcurrency: 1,
+  experimentalSearch: false,
+  experimentalPlanTool: false,
+  experimentalConfigOverrides: [],
+  selectedSkills: [],
 };
 
 function settingsPath(): string {
@@ -42,10 +54,18 @@ export function readSettings(): AppSettings {
     const raw = fs.readFileSync(p, 'utf8');
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') return { ...DEFAULT_SETTINGS };
-    return {
+    const merged: AppSettings = {
       ...DEFAULT_SETTINGS,
       ...(parsed as Partial<AppSettings>),
     };
+    merged.allowOutsideWorkspaceRead = !!merged.allowOutsideWorkspaceRead;
+    if (!Number.isFinite(merged.taskConcurrency) || merged.taskConcurrency < 1) merged.taskConcurrency = DEFAULT_SETTINGS.taskConcurrency;
+    merged.taskConcurrency = Math.max(1, Math.min(8, Math.floor(merged.taskConcurrency)));
+    if (!Array.isArray(merged.experimentalConfigOverrides)) merged.experimentalConfigOverrides = DEFAULT_SETTINGS.experimentalConfigOverrides;
+    merged.experimentalConfigOverrides = merged.experimentalConfigOverrides.filter((v) => typeof v === 'string');
+    if (!Array.isArray(merged.selectedSkills)) merged.selectedSkills = DEFAULT_SETTINGS.selectedSkills;
+    merged.selectedSkills = merged.selectedSkills.filter((v) => typeof v === 'string');
+    return merged;
   } catch {
     return { ...DEFAULT_SETTINGS };
   }
