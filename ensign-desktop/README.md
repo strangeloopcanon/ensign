@@ -152,18 +152,14 @@ npm run build:mac:signed
 # one-time: store notarization creds in Keychain
 xcrun notarytool store-credentials ensign-notary \
   --apple-id "you@example.com" \
-  --team-id "ABCDE12345"
+  --team-id "ABCDE12345" \
+  --sync
 
-# build (signed) without electron-builder notarization
-npx electron-builder --mac -c.mac.notarize=false
-
-# submit + wait, then staple
-xcrun notarytool submit "release/<YourApp>-<version>-arm64.dmg" \
-  --keychain-profile ensign-notary --wait --output-format json --no-progress
-xcrun stapler staple -v "release/<YourApp>-<version>-arm64.dmg"
+# build signed DMG + notarize + staple (uses ensign-notary if present)
+npm run build:mac:signed
 ```
 
 Notes
 - The builder is configured with hardened runtime and entitlements at `assets/entitlements.mac.plist`.
-- Notarization is enabled (`notarize: true`) and uses the env vars above; if notarization flakes locally, use Option B to submit/staple via `notarytool`.
+- Notarization is enabled (`notarize: true`) and uses the env vars above; local builds can also notarize via the Keychain profile (`ensign-notary`) without exposing secrets in env.
 - For CI, a ready‑to‑use workflow lives at `.github/workflows/mac-release.yml`.
