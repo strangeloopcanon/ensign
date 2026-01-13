@@ -19,10 +19,10 @@ const originalCodexHome = process.env.CODEX_HOME;
 const tasks = new TaskManager();
 
 function isStubMode(): boolean {
-  return process.env.ENSIGN_DESKTOP_FORCE_STUB === '1' || process.env.CODEX_DESKTOP_FORCE_STUB === '1';
+  return process.env.ENSIGN_DESKTOP_FORCE_STUB === '1';
 }
 
-const userDataOverride = process.env.ENSIGN_DESKTOP_USER_DATA || process.env.CODEX_DESKTOP_USER_DATA;
+const userDataOverride = process.env.ENSIGN_DESKTOP_USER_DATA;
 if (userDataOverride) {
   try {
     app.setPath('userData', path.resolve(userDataOverride));
@@ -294,26 +294,6 @@ ipcMain.handle('codex:taskEnqueue', async (_event, payload: EnqueueTaskPayload) 
 
     const saved = readSettings();
     const sandboxMode = isSandboxMode((payload as any).sandboxMode) ? (payload as any).sandboxMode : saved.sandboxMode;
-    let model: string | null = null;
-    if (typeof (payload as any).model === 'string') {
-      model = (payload as any).model as string;
-    } else if (typeof saved.modelOverride === 'string') {
-      model = saved.modelOverride;
-    }
-	    const includePlanTool =
-	      typeof (payload as any).includePlanTool === 'boolean' ? (payload as any).includePlanTool : saved.experimentalPlanTool;
-	    const enableSearch =
-	      typeof (payload as any).enableSearch === 'boolean' ? (payload as any).enableSearch : saved.experimentalSearch;
-	    const baseOverrides = Array.isArray((payload as any).configOverrides)
-	      ? (payload as any).configOverrides.filter((v: unknown) => typeof v === 'string')
-	      : saved.experimentalConfigOverrides;
-	    const configOverrides = Array.isArray(baseOverrides) ? [...baseOverrides] : [];
-	    if (saved.allowOutsideWorkspaceRead && sandboxMode !== 'danger-full-access') {
-	      const alreadyOverridesSandboxPermissions = configOverrides.some((o) => typeof o === 'string' && o.includes('sandbox_permissions'));
-	      if (!alreadyOverridesSandboxPermissions) {
-	        configOverrides.unshift('sandbox_permissions=["disk-full-read-access"]');
-	      }
-	    }
 
     let cwd = typeof payload.cwd === 'string' && payload.cwd.trim() ? payload.cwd.trim() : null;
     if (cwd) {
@@ -324,6 +304,43 @@ ipcMain.handle('codex:taskEnqueue', async (_event, payload: EnqueueTaskPayload) 
         else cwd = resolved;
       } catch {
         cwd = null;
+      }
+    }
+
+    let model: string | null = null;
+    if (typeof (payload as any).model === 'string') {
+      model = (payload as any).model as string;
+    } else if (typeof saved.modelOverride === 'string') {
+      model = saved.modelOverride;
+    }
+
+    const includePlanTool =
+      typeof (payload as any).includePlanTool === 'boolean' ? (payload as any).includePlanTool : saved.experimentalPlanTool;
+    const enableSearch =
+      typeof (payload as any).enableSearch === 'boolean' ? (payload as any).enableSearch : saved.experimentalSearch;
+    const baseOverrides = Array.isArray((payload as any).configOverrides)
+      ? (payload as any).configOverrides.filter((v: unknown) => typeof v === 'string')
+      : saved.experimentalConfigOverrides;
+    const configOverrides = Array.isArray(baseOverrides) ? [...baseOverrides] : [];
+
+    if (saved.allowOutsideWorkspaceRead && sandboxMode !== 'danger-full-access') {
+      const alreadyOverridesSandboxPermissions = configOverrides.some(
+        (o) => typeof o === 'string' && o.includes('sandbox_permissions')
+      );
+      if (!alreadyOverridesSandboxPermissions) {
+        configOverrides.unshift('sandbox_permissions=["disk-full-read-access"]');
+      }
+    }
+
+    if (sandboxMode === 'workspace-write' && saved.additionalWritableRoots.length > 0) {
+      const alreadyOverridesWritableRoots = configOverrides.some(
+        (o) => typeof o === 'string' && o.includes('sandbox_workspace_write.writable_roots')
+      );
+      if (!alreadyOverridesWritableRoots) {
+        const roots = cwd ? saved.additionalWritableRoots.filter((p) => p !== cwd) : saved.additionalWritableRoots;
+        if (roots.length > 0) {
+          configOverrides.unshift(`sandbox_workspace_write.writable_roots=${JSON.stringify(roots)}`);
+        }
       }
     }
 
@@ -559,6 +576,9 @@ ipcMain.handle('codex:updateSettings', async (_e, patch: Partial<AppSettings>) =
   try {
     const next: Partial<AppSettings> = {};
     if (typeof patch?.workspaceDir === 'string' || patch?.workspaceDir === null) next.workspaceDir = patch.workspaceDir;
+    if (Array.isArray((patch as any)?.additionalWritableRoots)) {
+      next.additionalWritableRoots = (patch as any).additionalWritableRoots.filter((v: unknown) => typeof v === 'string');
+    }
     if (typeof patch?.outputDir === 'string' || patch?.outputDir === null) next.outputDir = patch.outputDir;
     if (typeof patch?.modelOverride === 'string' || patch?.modelOverride === null) next.modelOverride = patch.modelOverride;
     if (patch?.codexHomeMode === 'app' || patch?.codexHomeMode === 'global') next.codexHomeMode = patch.codexHomeMode;
@@ -648,26 +668,49 @@ ipcMain.handle(
       cwd = undefined;
     }
   }
-	  const sandboxMode = isSandboxMode(payload?.sandboxMode) ? payload.sandboxMode : saved.sandboxMode;
-	  const modelOverride = typeof payload?.modelOverride === 'string' ? payload.modelOverride.trim() : saved.modelOverride?.trim() || null;
-	  const enableSearch = typeof payload?.enableSearch === 'boolean' ? payload.enableSearch : saved.experimentalSearch;
-	  const includePlanTool = typeof payload?.includePlanTool === 'boolean' ? payload.includePlanTool : saved.experimentalPlanTool;
-	  const selectedSkills = Array.isArray(payload?.selectedSkills) ? payload.selectedSkills : saved.selectedSkills;
-	  const allowOutsideWorkspaceRead = !!saved.allowOutsideWorkspaceRead && sandboxMode !== 'danger-full-access';
-	  const steps = [
-	    { id: 'parse', text: 'Parse inputs and understand intent' },
-	    cwd ? { id: 'cwd', text: `Work in folder: ${cwd}` } : null,
-	    allowOutsideWorkspaceRead ? { id: 'outside-read', text: 'May read files outside the selected folder (full disk read)' } : null,
-	    selectedSkills?.length ? { id: 'skills', text: `Use ${selectedSkills.length} skill(s)` } : null,
-	    files.length > 0 ? { id: 'read', text: `Read ${files.length} file(s)` } : { id: 'noop', text: 'No external files' },
-	    !stubMode && !apiKeyPresent ? { id: 'key', text: 'Configure API key in Settings' } : null,
-	    enableSearch ? { id: 'search', text: 'Enable web search' } : null,
-    includePlanTool ? { id: 'plan-tool', text: 'Enable plan tool (todos)' } : null,
-    { id: 'gen', text: 'Generate artifact' },
-    sandboxMode === 'danger-full-access' ? { id: 'full-disk', text: 'May access files outside the selected folder' } : null,
-    sandboxMode !== 'read-only' ? { id: 'writes', text: `Potentially write files (${sandboxMode})` } : null,
-    modelOverride ? { id: 'model', text: `Use model override: ${modelOverride}` } : null,
-  ].filter(Boolean) as { id: string; text: string }[];
+  const sandboxMode = isSandboxMode(payload?.sandboxMode) ? payload.sandboxMode : saved.sandboxMode;
+  const modelOverride =
+    typeof payload?.modelOverride === 'string' ? payload.modelOverride.trim() : saved.modelOverride?.trim() || null;
+  const enableSearch = typeof payload?.enableSearch === 'boolean' ? payload.enableSearch : saved.experimentalSearch;
+  const includePlanTool =
+    typeof payload?.includePlanTool === 'boolean' ? payload.includePlanTool : saved.experimentalPlanTool;
+  const selectedSkills = Array.isArray(payload?.selectedSkills) ? payload.selectedSkills : saved.selectedSkills;
+
+  const allowOutsideWorkspaceRead = !!saved.allowOutsideWorkspaceRead && sandboxMode !== 'danger-full-access';
+  const additionalWritableRoots = cwd ? saved.additionalWritableRoots.filter((p) => p !== cwd) : saved.additionalWritableRoots;
+  const allowAdditionalWrites = sandboxMode === 'workspace-write' && additionalWritableRoots.length > 0;
+
+  let additionalWriteSummary: string | null = null;
+  if (allowAdditionalWrites) {
+    const shown = additionalWritableRoots.slice(0, 2).join(', ');
+    additionalWriteSummary =
+      additionalWritableRoots.length > 2 ? `${shown}, … (+${additionalWritableRoots.length - 2})` : shown;
+  }
+
+  const steps: { id: string; text: string }[] = [];
+  steps.push({ id: 'parse', text: 'Parse inputs and understand intent' });
+
+  if (cwd) steps.push({ id: 'cwd', text: `Work in folder: ${cwd}` });
+  if (allowAdditionalWrites) {
+    let text = 'May write in additional folder(s)';
+    if (additionalWriteSummary) text = `May write in additional folder(s): ${additionalWriteSummary}`;
+    steps.push({ id: 'extra-write', text });
+  }
+  if (allowOutsideWorkspaceRead) {
+    steps.push({ id: 'outside-read', text: 'May read files outside the selected folder (full disk read)' });
+  }
+  if (selectedSkills?.length) steps.push({ id: 'skills', text: `Use ${selectedSkills.length} skill(s)` });
+  if (files.length > 0) steps.push({ id: 'read', text: `Read ${files.length} file(s)` });
+  else steps.push({ id: 'noop', text: 'No external files' });
+  if (!stubMode && !apiKeyPresent) steps.push({ id: 'key', text: 'Configure API key in Settings' });
+  if (enableSearch) steps.push({ id: 'search', text: 'Enable web search' });
+  if (includePlanTool) steps.push({ id: 'plan-tool', text: 'Enable plan tool (todos)' });
+  steps.push({ id: 'gen', text: 'Generate artifact' });
+  if (sandboxMode === 'danger-full-access') {
+    steps.push({ id: 'full-disk', text: 'May access files outside the selected folder' });
+  }
+  if (sandboxMode !== 'read-only') steps.push({ id: 'writes', text: `Potentially write files (${sandboxMode})` });
+  if (modelOverride) steps.push({ id: 'model', text: `Use model override: ${modelOverride}` });
   const promptText = (payload?.prompt || '').toLowerCase();
   const needsEmail = /\b(email|mail|inbox|reply|gmail)\b/.test(promptText);
   const needsCalendar = /\b(calendar|schedule|event|meeting)\b/.test(promptText);
@@ -684,21 +727,26 @@ ipcMain.handle(
       required,
     };
   });
-	  const permissions = [
-	    ...(files.length
-	      ? [{ id: 'read-files', label: `Read ${files.length} file(s)`, required: true }]
-	      : []),
-	    ...(!stubMode ? [{ id: 'network', label: 'Network access (model call)', required: true }] : []),
-	    ...(allowOutsideWorkspaceRead
-	      ? [{ id: 'full-disk-read', label: 'Read files outside the selected folder (full disk read)', required: true }]
-	      : []),
-	    ...(sandboxMode === 'danger-full-access'
-	      ? [{ id: 'full-disk', label: 'Access files outside the selected folder (full disk)', required: true }]
-	      : []),
-	    ...(sandboxMode !== 'read-only' ? [{ id: 'write-workspace', label: `Write files (${sandboxMode})`, required: true }] : []),
-	    ...mcpPermissions,
+  const permissions = [
+    ...(files.length ? [{ id: 'read-files', label: `Read ${files.length} file(s)`, required: true }] : []),
+    ...(!stubMode ? [{ id: 'network', label: 'Network access (model call)', required: true }] : []),
+    ...(allowOutsideWorkspaceRead
+      ? [{ id: 'full-disk-read', label: 'Read files outside the selected folder (full disk read)', required: true }]
+      : []),
+    ...(allowAdditionalWrites
+      ? [{ id: 'extra-write', label: 'Write in additional folder(s) outside the workspace', required: true }]
+      : []),
+    ...(sandboxMode === 'danger-full-access'
+      ? [{ id: 'full-disk', label: 'Access files outside the selected folder (full disk)', required: true }]
+      : []),
+    ...(sandboxMode !== 'read-only' ? [{ id: 'write-workspace', label: `Write files (${sandboxMode})`, required: true }] : []),
+    ...mcpPermissions,
   ];
-  const sources = [...(cwd ? [cwd] : []), ...files.map((f) => f.name)];
+
+  const sources: string[] = [];
+  if (cwd) sources.push(cwd);
+  if (allowAdditionalWrites) sources.push(...additionalWritableRoots);
+  sources.push(...files.map((f) => f.name));
   return { ok: true, plan: { steps, permissions, sources } };
 });
 

@@ -8,6 +8,7 @@ export type SettingsTab = 'general' | 'connection' | 'advanced';
 
 export type Settings = {
   workspaceDir: string | null;
+  additionalWritableRoots: string[];
   outputDir: string | null;
   modelOverride: string | null;
   codexHomeMode: 'app' | 'global';
@@ -166,6 +167,8 @@ export function SettingsModal({
     !!window.codex.mcpAdd &&
     mcpAddName.trim().length > 0 &&
     (mcpAddTransport === 'stdio' ? mcpAddCommand.trim().length > 0 : mcpAddUrl.trim().length > 0);
+
+  const additionalWritableRoots = Array.isArray(settings.additionalWritableRoots) ? settings.additionalWritableRoots : [];
 
   return (
     <div className="modalOverlay" role="dialog" aria-label="Settings" onMouseDown={onClose}>
@@ -350,6 +353,80 @@ export function SettingsModal({
                   />
                   <span>Allow reading outside the selected folder (full disk read)</span>
                 </label>
+
+                <div className="settingsRow" style={{ marginTop: 10 }}>
+                  <div>
+                    <div className="settingsLabel">Additional writable folders</div>
+                    <div className="settingsValue">
+                      Optional. Lets Ensign write outside the workspace when Permissions is “Write workspace”.
+                    </div>
+                  </div>
+                  <div className="settingsActions">
+                    <button
+                      disabled={busy}
+                      onClick={async () => {
+                        const p = await onPickDirectory();
+                        if (!p) return;
+                        await runWithBusy(async () => {
+                          const next = additionalWritableRoots.includes(p)
+                            ? additionalWritableRoots
+                            : [...additionalWritableRoots, p];
+                          await onSaveSettings({ additionalWritableRoots: next });
+                        });
+                      }}
+                    >
+                      Add…
+                    </button>
+                    <button
+                      disabled={busy || additionalWritableRoots.length === 0}
+                      onClick={async () => {
+                        await runWithBusy(async () => {
+                          await onSaveSettings({ additionalWritableRoots: [] });
+                        });
+                      }}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+
+                {additionalWritableRoots.length === 0 ? (
+                  <div className="planHint">None.</div>
+                ) : (
+                  <ul className="permissionList">
+                    {additionalWritableRoots.map((root) => (
+                      <li key={root}>
+                        <div className="permissionItem" style={{ justifyContent: 'space-between', width: '100%' }}>
+                          <span style={{ fontFamily: 'monospace', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {root}
+                          </span>
+                          <span style={{ display: 'flex', gap: 6 }}>
+                            <button
+                              disabled={busy}
+                              onClick={async () => {
+                                await window.codex.openPath(root);
+                              }}
+                            >
+                              Open
+                            </button>
+                            <button
+                              disabled={busy}
+                              onClick={async () => {
+                                await runWithBusy(async () => {
+                                  await onSaveSettings({
+                                    additionalWritableRoots: additionalWritableRoots.filter((p) => p !== root),
+                                  });
+                                });
+                              }}
+                            >
+                              Remove
+                            </button>
+                          </span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             </>
           ) : null}
