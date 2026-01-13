@@ -3,10 +3,11 @@ import { createRoot } from 'react-dom/client';
 import { CommandBar } from './components/CommandBar';
 import { Canvas } from './components/Canvas';
 import { DiffView } from './components/DiffView';
-import { PlanDrawer, type Plan } from './components/PlanDrawer';
+import type { Plan } from './components/PlanDrawer';
 import { PlanReviewModal } from './components/PlanReviewModal';
 import { ActionBar } from './components/ActionBar';
 import { HomeTemplates } from './components/HomeTemplates';
+import { TaskDrawer, type Task } from './components/TaskDrawer';
 import { SettingsModal, type Settings, type SettingsTab } from './components/SettingsModal';
 import { SaveAsModal } from './components/SaveAsModal';
 import { ToastHost, type Toast, type ToastKind } from './components/ToastHost';
@@ -26,6 +27,14 @@ function truncateMiddle(s: string, max: number): string {
   return `${s.slice(0, keep)}…${s.slice(-keep)}`;
 }
 
+function upsertById<T extends { id: string }>(items: T[], next: T): T[] {
+  const idx = items.findIndex((i) => i.id === next.id);
+  if (idx === -1) return [...items, next];
+  const copy = items.slice();
+  copy[idx] = next;
+  return copy;
+}
+
 const DEFAULT_SETTINGS: Settings = {
   workspaceDir: null,
   outputDir: null,
@@ -33,17 +42,25 @@ const DEFAULT_SETTINGS: Settings = {
   codexHomeMode: 'app',
   sandboxMode: 'read-only',
   includeFileContents: true,
+  allowOutsideWorkspaceRead: false,
+  taskConcurrency: 1,
+  experimentalSearch: false,
+  experimentalPlanTool: false,
+  experimentalConfigOverrides: [],
+  selectedSkills: [],
 };
 
 function App() {
   const [prompt, setPrompt] = useState('');
-  const [running, setRunning] = useState(false);
+  const [planning, setPlanning] = useState(false);
+  const [queuing, setQueuing] = useState(false);
   const [plan, setPlan] = useState<Plan | null>(null);
-  const [planOpen, setPlanOpen] = useState(false);
   const [planReviewOpen, setPlanReviewOpen] = useState(false);
-  const [artifact, setArtifact] = useState<{ kind: 'text'; name?: string; content: string } | null>(null);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [taskDrawerOpen, setTaskDrawerOpen] = useState(false);
+  const [taskSourceText, setTaskSourceText] = useState<Record<string, string>>({});
   const [dropped, setDropped] = useState<DroppedFile[]>([]);
-  const [home, setHome] = useState(true);
   const [sourceText, setSourceText] = useState<string>('');
   const [permissionGrants, setPermissionGrants] = useState<Record<string, boolean>>({});
   const [status, setStatus] = useState<{ model: string | null; auth: string | null; mcpNames: string[]; configPath: string; configExists: boolean } | null>(null);
@@ -55,7 +72,6 @@ function App() {
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [saveSuggestedName, setSaveSuggestedName] = useState('artifact');
   const [saveBusy, setSaveBusy] = useState(false);
-  const runStartedAtRef = React.useRef<number | null>(null);
   const [, setRunningTick] = useState(0);
 
   const dismissToast = React.useCallback((id: string) => {
@@ -71,8 +87,13 @@ function App() {
       const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
       const toast: Toast = { id, message, kind, actionLabel: options?.actionLabel, onAction: options?.onAction };
       setToasts((prev) => [...prev, toast]);
-      const ttl = typeof options?.ttlMs === 'number' ? options.ttlMs : kind === 'error' ? 7000 : 4000;
-      window.setTimeout(() => dismissToast(id), ttl);
+      let ttlMs = 4000;
+      if (typeof options?.ttlMs === 'number') {
+        ttlMs = options.ttlMs;
+      } else if (kind === 'error') {
+        ttlMs = 7000;
+      }
+      window.setTimeout(() => dismissToast(id), ttlMs);
     },
     [dismissToast]
   );
@@ -90,8 +111,24 @@ function App() {
       cwd: settings.workspaceDir,
       sandboxMode: settings.sandboxMode,
       modelOverride: settings.modelOverride,
+      allowOutsideWorkspaceRead: settings.allowOutsideWorkspaceRead,
+      selectedSkills: (settings.selectedSkills || []).join('|'),
+      experimentalSearch: settings.experimentalSearch,
+      experimentalPlanTool: settings.experimentalPlanTool,
+      configOverrides: (settings.experimentalConfigOverrides || []).join('|'),
     });
-  }, [dropped, prompt, settings.modelOverride, settings.sandboxMode, settings.workspaceDir]);
+  }, [
+    dropped,
+    prompt,
+    settings.experimentalConfigOverrides,
+    settings.experimentalPlanTool,
+    settings.experimentalSearch,
+    settings.allowOutsideWorkspaceRead,
+    settings.modelOverride,
+    settings.sandboxMode,
+    settings.selectedSkills,
+    settings.workspaceDir,
+  ]);
 
   const refreshStatus = React.useCallback(async () => {
     const [s, e, st] = await Promise.allSettled([
@@ -110,7 +147,6 @@ function App() {
     });
     const unsubFiles = window.codex?.onIncomingFiles?.(async (paths: string[]) => {
       if (!paths?.length) return;
-      setHome(false);
       setDropped((prev) => [
         ...prev,
         ...paths.map((p) => ({ name: p.split(/[/\\]/).pop() || p, path: p })),
@@ -119,19 +155,73 @@ function App() {
       const r = await window.codex.readFileText(first);
       if (r.ok && r.text) setSourceText(r.text);
     });
+    const unsubTask = window.codex?.onTaskEvent?.((ev: any) => {
+      if (!ev || typeof ev !== 'object') return;
+      const type = String((ev as any).type || '');
+      if (type === 'task.created' && (ev as any).task) {
+        const task = (ev as any).task as Task;
+        setTasks((prev) => [...prev, task]);
+        setSelectedTaskId(task.id);
+        setTaskDrawerOpen(true);
+        return;
+      }
+      if (type === 'task.updated') {
+        const taskId = String((ev as any).taskId || '');
+        const patch = (ev as any).patch || {};
+        if (!taskId) return;
+        setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, ...patch } : t)));
+        return;
+      }
+      if (type === 'task.outputDelta') {
+        const taskId = String((ev as any).taskId || '');
+        const delta = String((ev as any).delta || '');
+        if (!taskId || !delta) return;
+        setTasks((prev) =>
+          prev.map((t) => (t.id === taskId ? { ...t, outputText: (t.outputText || '') + delta } : t))
+        );
+        return;
+      }
+      if (type === 'task.item') {
+        const taskId = String((ev as any).taskId || '');
+        const item = (ev as any).item;
+        if (!taskId || !item?.id) return;
+        setTasks((prev) =>
+          prev.map((t) => (t.id === taskId ? { ...t, items: upsertById(t.items || [], item) } : t))
+        );
+      }
+    });
+
+    const refreshTasks = async () => {
+      try {
+        const res = await window.codex.taskList();
+        if (res.ok && Array.isArray((res as any).tasks)) {
+          const list = (res as any).tasks as Task[];
+          setTasks(list);
+          setSelectedTaskId((previous) => {
+            if (previous != null) return previous;
+            if (!list.length) return null;
+            return list[list.length - 1].id;
+          });
+        }
+      } catch {}
+    };
+
     refreshStatus().catch((err) => console.error('Failed to read initial status', err));
+    refreshTasks().catch(() => {});
 
     return () => {
       try { unsubHotkey && unsubHotkey(); } catch {}
       try { unsubFiles && unsubFiles(); } catch {}
+      try { unsubTask && unsubTask(); } catch {}
     };
-  }, [refreshStatus, settings.workspaceDir]);
+  }, [refreshStatus]);
 
   useEffect(() => {
-    if (!running) return;
+    const anyRunning = tasks.some((t) => t.status === 'running');
+    if (!anyRunning) return;
     const t = setInterval(() => setRunningTick((n) => n + 1), 1000);
     return () => clearInterval(t);
-  }, [running]);
+  }, [tasks]);
 
   // If inputs change after a plan is generated, force a new preview to avoid running with a stale plan.
   useEffect(() => {
@@ -145,7 +235,6 @@ function App() {
       ...prev,
       ...files.map((f) => ({ name: f.name, path: (f as any).path })),
     ]);
-    setHome(false);
     const firstPath = files.map((f) => (f as any).path).find(Boolean);
     if (firstPath) {
       window.codex.readFileText(firstPath).then((res) => {
@@ -156,8 +245,7 @@ function App() {
 
   const runPlan = async () => {
     if (!prompt.trim()) return;
-    setRunning(true);
-    setHome(false);
+    setPlanning(true);
     const files = dropped.map((f) => ({ name: f.name }));
     const r = await window.codex.plan({
       prompt,
@@ -166,7 +254,7 @@ function App() {
       sandboxMode: settings.sandboxMode,
       modelOverride: settings.modelOverride,
     });
-    setRunning(false);
+    setPlanning(false);
     if (r.ok && r.plan) setPlan(r.plan);
     if (r.ok && r.plan) {
       const next: Record<string, boolean> = {};
@@ -178,77 +266,108 @@ function App() {
 
   const acceptPlan = async () => {
     if (!plan) return;
-    const required = plan.permissions.filter((p) => p.required);
-    const allGranted = required.every((p) => permissionGrants[p.id]);
-    if (!allGranted) {
-      setPlanReviewOpen(true);
-      pushToast('Review and accept required permissions first.', 'error');
-      return;
-    }
-    if (!envInfo?.apiKeyPresent && !envInfo?.stubMode) {
-      openSettings('connection');
-      pushToast('Add an API key in Settings to run.', 'error');
-      return;
-    }
-    setPlanOpen(false);
-    setPlanReviewOpen(false);
-    runStartedAtRef.current = Date.now();
-    setRunning(true);
-    setArtifact({ kind: 'text', content: '' });
-    let streamed = '';
-    const unsub = window.codex.onStream?.((chunk) => {
-      streamed += chunk;
-      setArtifact({ kind: 'text', content: streamed });
-    });
-
-    let effectivePrompt = prompt.trim();
-    if (dropped.length) {
-      const sources = dropped
-        .map((f) => (f.path ? `${f.name} (${f.path})` : f.name))
-        .join('\n- ');
-      effectivePrompt += `\n\nSources:\n- ${sources}\n`;
-
-      if (settings.includeFileContents) {
-        let remainingBudget = 120_000;
-        for (const f of dropped) {
-          if (!f.path) continue;
-          if (remainingBudget <= 0) break;
-          const r = await window.codex.readFileText(f.path);
-          if (!r.ok || !r.text) {
-            effectivePrompt += `\n\n[${f.name}] (unable to read as text: ${r.error || 'unknown error'})\n`;
-            continue;
-          }
-          const maxPerFile = 20_000;
-          const chunk = r.text.slice(0, Math.min(maxPerFile, remainingBudget));
-          remainingBudget -= chunk.length;
-          const truncated = r.text.length > chunk.length ? '\n...[truncated]...' : '';
-          effectivePrompt += `\n\n[${f.name}]\n${chunk}${truncated}\n`;
-        }
-      } else {
-        effectivePrompt += `\nNote: file contents are not embedded. If needed, read the source files from disk.\n`;
-      }
-    }
-
+    if (queuing) return;
+    setQueuing(true);
     try {
-      const res = await window.codex.run(effectivePrompt, {
-        cwd: settings.workspaceDir || undefined,
-        sandboxMode: settings.sandboxMode,
-        modelOverride: settings.modelOverride,
-      });
-      if (res.ok) {
-        setArtifact({ kind: 'text', content: res.text || streamed || '' });
-      } else {
-        setArtifact({ kind: 'text', content: `Error: ${res.error}` });
+      const userPrompt = prompt.trim();
+      const required = plan.permissions.filter((p) => p.required);
+      const allGranted = required.every((p) => permissionGrants[p.id]);
+      if (!allGranted) {
+        setPlanReviewOpen(true);
+        pushToast('Review and accept required permissions first.', 'error');
+        return;
       }
+      if (!envInfo?.apiKeyPresent && !envInfo?.stubMode) {
+        openSettings('connection');
+        pushToast('Add an API key in Settings to run.', 'error');
+        return;
+      }
+      setPlanReviewOpen(false);
+
+      const sourceTextForTask = sourceText;
+      let effectivePrompt = userPrompt;
+
+      const selectedSkillIds = (settings.selectedSkills || []).filter(Boolean);
+      if (selectedSkillIds.length) {
+        try {
+          const skillRes = await window.codex.listSkills({ cwd: settings.workspaceDir || null });
+          if (skillRes.ok && Array.isArray(skillRes.skills)) {
+            const chosen = skillRes.skills.filter((s) => selectedSkillIds.includes(s.id) && s.instructions);
+            if (chosen.length) {
+              effectivePrompt += `\n\nSkills (local instruction packs):\n`;
+              for (const s of chosen) {
+                const desc = s.description ? ` — ${s.description}` : '';
+                effectivePrompt += `\n[Skill: ${s.name || s.id}${desc}]\n${s.instructions}\n`;
+              }
+            }
+          }
+        } catch {}
+      }
+      if (dropped.length) {
+        const sources = dropped
+          .map((f) => (f.path ? `${f.name} (${f.path})` : f.name))
+          .join('\n- ');
+        effectivePrompt += `\n\nSources:\n- ${sources}\n`;
+
+        if (settings.includeFileContents) {
+          let remainingBudget = 120_000;
+          for (const f of dropped) {
+            if (!f.path) continue;
+            if (remainingBudget <= 0) break;
+            const r = await window.codex.readFileText(f.path);
+            if (!r.ok || !r.text) {
+              effectivePrompt += `\n\n[${f.name}] (unable to read as text: ${r.error || 'unknown error'})\n`;
+              continue;
+            }
+            const maxPerFile = 20_000;
+            const chunk = r.text.slice(0, Math.min(maxPerFile, remainingBudget));
+            remainingBudget -= chunk.length;
+            const truncated = r.text.length > chunk.length ? '\n...[truncated]...' : '';
+            effectivePrompt += `\n\n[${f.name}]\n${chunk}${truncated}\n`;
+          }
+        } else {
+          effectivePrompt += `\nNote: file contents are not embedded. If needed, read the source files from disk.\n`;
+        }
+      }
+
+      const res = await window.codex.taskEnqueue({
+        userPrompt,
+        effectivePrompt,
+        cwd: settings.workspaceDir || null,
+        sandboxMode: settings.sandboxMode,
+        model: settings.modelOverride,
+        plan,
+        includePlanTool: settings.experimentalPlanTool,
+        enableSearch: settings.experimentalSearch,
+        configOverrides: settings.experimentalConfigOverrides,
+      });
+      if (!res.ok) {
+        pushToast(`Failed to queue task: ${res.error || 'unknown error'}`, 'error');
+        return;
+      }
+
+      const taskId: string | null = (res as any).taskId || (res as any).task?.id || null;
+      if (taskId && sourceTextForTask) {
+        setTaskSourceText((prev) => ({ ...prev, [taskId]: sourceTextForTask }));
+      }
+
+      pushToast('Task queued.', 'success');
+      setSelectedTaskId(taskId);
+      setTaskDrawerOpen(true);
+      setPrompt('');
+      setDropped([]);
+      setSourceText('');
+      setPlan(null);
+      setPermissionGrants({});
     } finally {
-      setRunning(false);
-      runStartedAtRef.current = null;
-      try { unsub && unsub(); } catch {}
+      setQueuing(false);
     }
   };
 
   const save = async () => {
-    const suggested = (prompt || 'artifact').split(/\r?\n/)[0].slice(0, 80);
+    const t = tasks.find((x) => x.id === selectedTaskId);
+    const base = t?.userPrompt || prompt || 'artifact';
+    const suggested = base.split(/\r?\n/)[0].slice(0, 80);
     setSaveSuggestedName(suggested || 'artifact');
     setSaveModalOpen(true);
   };
@@ -261,14 +380,34 @@ function App() {
       .every((p) => permissionGrants[p.id]);
   }, [envInfo, plan, permissionGrants, prompt]);
   const canRun = !!plan && canAcceptWithPermissions;
-  const canSave = !!artifact?.content;
-  const showHome = home && !prompt.trim() && dropped.length === 0 && !artifact?.content;
+  const selectedTask = useMemo(() => tasks.find((t) => t.id === selectedTaskId) ?? null, [selectedTaskId, tasks]);
+  const canSave = !!selectedTask?.outputText;
+  const showHome = !prompt.trim() && dropped.length === 0 && !selectedTask?.outputText && tasks.length === 0;
   const needsApiKey = !!envInfo && !envInfo.apiKeyPresent && !envInfo.stubMode;
+  const runningTasks = tasks.filter((t) => t.status === 'running').length;
+  const queuedTasks = tasks.filter((t) => t.status === 'queued').length;
   const runningSeconds =
-    running && runStartedAtRef.current != null ? Math.max(0, Math.floor((Date.now() - runStartedAtRef.current) / 1000)) : null;
+    selectedTask?.status === 'running' && selectedTask.startedAt != null
+      ? Math.max(0, Math.floor((Date.now() - selectedTask.startedAt) / 1000))
+      : null;
   const workspaceLabel = settings.workspaceDir
     ? truncateMiddle(abbreviatePath(settings.workspaceDir), 44)
     : 'not set';
+  const artifact = selectedTask ? { kind: 'text' as const, content: selectedTask.outputText || '' } : null;
+  const selectedRunning = selectedTask?.status === 'running';
+  const selectedDiffSource = selectedTask ? taskSourceText[selectedTask.id] : '';
+
+  let commandBarPrimaryLabel = 'Generate plan';
+  if (planning) commandBarPrimaryLabel = 'Planning…';
+  else if (queuing) commandBarPrimaryLabel = 'Queuing…';
+  else if (plan) {
+    if (canRun) commandBarPrimaryLabel = 'Queue task';
+    else commandBarPrimaryLabel = 'Review plan';
+  }
+
+  let llmBadgeText = 'LLM: needs key';
+  if (envInfo?.stubMode) llmBadgeText = 'LLM: stub';
+  else if (envInfo?.apiKeyPresent) llmBadgeText = 'LLM: ready';
 
   return (
     <div id="app" style={{ display: 'contents' }}>
@@ -276,7 +415,7 @@ function App() {
         value={prompt}
         onChange={setPrompt}
         onPrimaryAction={() => {
-          if (running) return;
+          if (planning || queuing) return;
           if (!prompt.trim()) return;
           if (!plan) {
             runPlan();
@@ -288,9 +427,9 @@ function App() {
           }
           acceptPlan();
         }}
-        primaryLabel={running ? 'Running…' : plan ? (canRun ? 'Run' : 'Review plan') : 'Generate plan'}
-        primaryDisabled={running || !prompt.trim()}
-        primaryBusy={running}
+        primaryLabel={commandBarPrimaryLabel}
+        primaryDisabled={planning || queuing || !prompt.trim()}
+        primaryBusy={planning || queuing}
         onDropFiles={onDropFiles}
       />
       <div className="toolbar" data-testid="toolbar">
@@ -302,16 +441,25 @@ function App() {
             {`default model: ${settings.modelOverride || status?.model || 'default'}`}
           </span>
           <span className="badge">
-            {envInfo?.stubMode ? 'LLM: stub' : envInfo?.apiKeyPresent ? 'LLM: ready' : 'LLM: needs key'}
+            {llmBadgeText}
           </span>
-          {running ? (
+          {planning ? (
             <span className="badge" aria-live="polite">
               <span className="buttonInner">
                 <span className="spinner small" aria-hidden="true" />
-                <span>{`Running${runningSeconds != null ? ` · ${runningSeconds}s` : ''}`}</span>
+                <span>Planning…</span>
               </span>
             </span>
           ) : null}
+          {runningTasks ? (
+            <span className="badge" aria-live="polite">
+              <span className="buttonInner">
+                <span className="spinner small" aria-hidden="true" />
+                <span>{`Running: ${runningTasks}${runningSeconds != null ? ` · ${runningSeconds}s` : ''}`}</span>
+              </span>
+            </span>
+          ) : null}
+          {!runningTasks && queuedTasks ? <span className="badge">{`Queued: ${queuedTasks}`}</span> : null}
           {dropped.length ? <span className="badge">{`sources: ${dropped.length}`}</span> : null}
         </div>
         <div className="toolbarRight">
@@ -335,7 +483,7 @@ function App() {
         <Canvas
           home={showHome}
           artifact={artifact}
-          running={running}
+          running={selectedRunning}
           homeContent={
             showHome && needsApiKey ? (
               <div className="homeState">
@@ -353,19 +501,33 @@ function App() {
           {showHome && (
             <HomeTemplates onPick={(t) => { setPrompt(t + ' '); }} />
           )}
-          {!!artifact?.content && !!sourceText && (
-            <DiffView oldText={sourceText} newText={artifact.content} />
+          {!!artifact?.content && !!selectedDiffSource && (
+            <DiffView oldText={selectedDiffSource} newText={artifact.content} />
           )}
         </Canvas>
-        <PlanDrawer
-          plan={plan}
-          open={planOpen}
-          onToggle={() => setPlanOpen((v) => !v)}
-          grants={permissionGrants}
-          onGrantChange={(id, value) => setPermissionGrants((prev) => ({ ...prev, [id]: value }))}
-          canRun={canRun}
-          running={running}
-          onRun={acceptPlan}
+        <TaskDrawer
+          open={taskDrawerOpen}
+          onToggle={() => setTaskDrawerOpen((v) => !v)}
+          tasks={tasks}
+          selectedTaskId={selectedTaskId}
+          onSelectTask={(id) => {
+            setSelectedTaskId(id);
+            setTaskDrawerOpen(true);
+          }}
+          onCancelTask={async (id) => {
+            const r = await window.codex.taskCancel(id);
+            if (!r.ok) pushToast(`Failed to cancel task: ${r.error || 'unknown error'}`, 'error');
+          }}
+          onResumeTask={async (taskId, reply) => {
+            const r = await window.codex.taskResume({ taskId, prompt: reply });
+            if (!r.ok) pushToast(`Failed to resume task: ${r.error || 'unknown error'}`, 'error');
+            if (r.ok) {
+              pushToast('Task resumed.', 'success');
+              setSelectedTaskId(taskId);
+              setTaskDrawerOpen(true);
+            }
+            return r;
+          }}
         />
       </div>
       <ActionBar
@@ -386,7 +548,7 @@ function App() {
         onSave={async (name) => {
           setSaveBusy(true);
           try {
-            const res = await window.codex.saveArtifact({ name, kind: 'text', content: artifact?.content || '' });
+            const res = await window.codex.saveArtifact({ name, kind: 'text', content: selectedTask?.outputText || '' });
             if (!res.ok) {
               pushToast(`Failed to save: ${res.error || 'unknown error'}`, 'error');
               return;
@@ -408,7 +570,7 @@ function App() {
         plan={plan}
         grants={permissionGrants}
         canRun={canRun}
-        running={running}
+        running={queuing}
         needsApiKey={!!envInfo && !envInfo.apiKeyPresent && !envInfo.stubMode}
         onClose={() => setPlanReviewOpen(false)}
         onOpenSettings={() => openSettings('connection')}

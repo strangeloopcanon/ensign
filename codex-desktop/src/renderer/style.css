@@ -55,6 +55,26 @@ body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; marg
 .permIcon { width: 18px; text-align: center; opacity: 0.9; }
 .planFooter { margin: 10px 0; padding: 10px; border: 1px solid #4443; border-radius: 12px; background: color-mix(in srgb, Canvas 85%, CanvasText 15%); }
 .planHint { margin-top: 6px; font-size: 12px; opacity: 0.8; }
+.taskList { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.taskRow { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: start; }
+.taskSelect { width: 100%; text-align: left; padding: 8px 10px; border-radius: 12px; border: 1px solid #4443; background: color-mix(in srgb, Canvas 92%, CanvasText 8%); cursor: pointer; }
+.taskRow.active .taskSelect { border-color: #0a84ff88; background: #0a84ff1a; }
+.taskTop { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.taskTitle { margin-top: 6px; font-size: 13px; font-weight: 600; word-break: break-word; }
+.taskTime { font-size: 11px; opacity: 0.7; }
+.taskStatus { font-size: 11px; border: 1px solid #4443; padding: 2px 8px; border-radius: 999px; opacity: 0.9; }
+.taskStatus.running { border-color: #4aa3ff88; }
+.taskStatus.needs_input { border-color: #f5a62388; }
+.taskStatus.completed { border-color: #4cd96488; }
+.taskStatus.failed { border-color: #ff3b3088; }
+.taskStatus.canceled { border-color: #8888; opacity: 0.7; }
+.taskStatus.in_progress { border-color: #4aa3ff88; }
+.taskCancel { padding: 6px 10px; border-radius: 12px; border: 1px solid #4443; background: transparent; cursor: pointer; }
+.activityList { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.activityRow { padding: 8px 10px; border-radius: 12px; border: 1px solid #4443; background: color-mix(in srgb, Canvas 92%, CanvasText 8%); display: grid; gap: 4px; }
+.activitySummary { font-size: 12px; }
+.activityMeta { display: flex; gap: 6px; align-items: center; font-size: 11px; opacity: 0.8; flex-wrap: wrap; }
+.activityCode { opacity: 0.9; }
 
 /* Action bar */
 .actionBar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-top: 1px solid #4443; }
@@ -80,6 +100,7 @@ button { padding: 6px 10px; }
 .settingsValue { font-size: 12px; opacity: 0.8; margin-top: 2px; }
 .settingsActions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
 .settingsInput { padding: 6px 10px; border-radius: 8px; border: 1px solid #4443; min-width: 240px; }
+.settingsTextArea { padding: 6px 10px; border-radius: 8px; border: 1px solid #4443; min-width: 360px; max-width: 520px; width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .settingsSelect { padding: 6px 10px; border-radius: 8px; border: 1px solid #4443; }
 .settingsCheckboxRow { display: flex; gap: 8px; align-items: center; margin-top: 10px; font-size: 13px; }
 .verifyStatus { margin-top: 8px; font-size: 12px; opacity: 0.9; }

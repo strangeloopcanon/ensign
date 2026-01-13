@@ -5,6 +5,11 @@ contextBridge.exposeInMainWorld('codex', {
     ipcRenderer.invoke('codex:run', { prompt, ...(opts || {}) }),
   plan: (payload: { prompt: string; files?: { name: string }[]; cwd?: string; sandboxMode?: string; modelOverride?: string | null }) =>
     ipcRenderer.invoke('codex:plan', payload),
+  taskList: () => ipcRenderer.invoke('codex:taskList'),
+  taskEnqueue: (payload: any) => ipcRenderer.invoke('codex:taskEnqueue', payload),
+  taskCancel: (taskId: string) => ipcRenderer.invoke('codex:taskCancel', taskId),
+  taskResume: (payload: { taskId: string; prompt: string }) => ipcRenderer.invoke('codex:taskResume', payload),
+  listSkills: (payload?: { cwd?: string | null }) => ipcRenderer.invoke('codex:listSkills', payload),
   readStatus: () => ipcRenderer.invoke('codex:readStatus'),
   getEnvInfo: () => ipcRenderer.invoke('codex:getEnvInfo'),
   getSettings: () => ipcRenderer.invoke('codex:getSettings'),
@@ -13,6 +18,10 @@ contextBridge.exposeInMainWorld('codex', {
   importGlobalCodexConfig: () => ipcRenderer.invoke('codex:importGlobalCodexConfig'),
   openConfig: () => ipcRenderer.invoke('codex:openConfig'),
   openMcpDocs: () => ipcRenderer.invoke('codex:openMcpDocs'),
+  mcpList: () => ipcRenderer.invoke('codex:mcpList'),
+  mcpGet: (name: string) => ipcRenderer.invoke('codex:mcpGet', name),
+  mcpAdd: (payload: any) => ipcRenderer.invoke('codex:mcpAdd', payload),
+  mcpRemove: (name: string) => ipcRenderer.invoke('codex:mcpRemove', name),
   saveApiKey: (key: string) => ipcRenderer.invoke('codex:saveApiKey', key),
   verifyApiKey: (key?: string) => ipcRenderer.invoke('codex:verifyApiKey', key),
   pickCwd: () => ipcRenderer.invoke('codex:pickCwd'),
@@ -38,6 +47,11 @@ contextBridge.exposeInMainWorld('codex', {
     const fn = (_: any, paths: string[]) => cb(paths);
     ipcRenderer.on('codex:incomingFiles', fn);
     return () => ipcRenderer.removeListener('codex:incomingFiles', fn);
+  },
+  onTaskEvent: (cb: (event: any) => void) => {
+    const fn = (_: any, event: any) => cb(event);
+    ipcRenderer.on('codex:taskEvent', fn);
+    return () => ipcRenderer.removeListener('codex:taskEvent', fn);
   },
 });
 

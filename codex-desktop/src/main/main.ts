@@ -3,15 +3,20 @@ import path from 'node:path';
 import fs from 'node:fs';
 import * as url from 'node:url';
 import os from 'node:os';
+import { spawn } from 'node:child_process';
 import { runTask } from './codex';
 import { readStatus, getConfigPath } from './config';
 import dotenv from 'dotenv';
 import { recordCreate, undo as txUndo, redo as txRedo, history as txHistory } from './transactions';
 import { readSettings, updateSettings, type AppSettings, type SandboxMode } from './settings';
+import { TaskManager, type EnqueueTaskPayload } from './tasks';
+import { listWorkspaceSkills } from './skills';
+import { resolveBundledCodexPath } from './codex_bin';
 
 const isDev = process.env.NODE_ENV !== 'production' && !app.isPackaged;
 let cachedEnvPath: string | null = null;
 const originalCodexHome = process.env.CODEX_HOME;
+const tasks = new TaskManager();
 
 const userDataOverride = process.env.CODEX_DESKTOP_USER_DATA;
 if (userDataOverride) {
@@ -88,6 +93,54 @@ function applyCodexHomeFromSettings(settings: AppSettings) {
   }
 }
 
+type BundledCodexResult = {
+  ok: boolean;
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  error?: string;
+};
+
+async function runBundledCodex(args: string[]): Promise<BundledCodexResult> {
+  const codexPath = resolveBundledCodexPath();
+  if (!codexPath) return { ok: false, stdout: '', stderr: '', exitCode: null, error: 'Bundled Codex binary not found' };
+
+  return new Promise((resolve) => {
+    const child = spawn(codexPath, args, { env: process.env });
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+
+    child.once('error', (err) => {
+      resolve({
+        ok: false,
+        stdout: Buffer.concat(stdoutChunks).toString('utf8'),
+        stderr: Buffer.concat(stderrChunks).toString('utf8'),
+        exitCode: null,
+        error: err?.message || 'Failed to spawn Codex',
+      });
+    });
+
+    child.stdout?.on('data', (d) => stdoutChunks.push(Buffer.from(d)));
+    child.stderr?.on('data', (d) => stderrChunks.push(Buffer.from(d)));
+
+    child.once('exit', (code) => {
+      const stdout = Buffer.concat(stdoutChunks).toString('utf8');
+      const stderr = Buffer.concat(stderrChunks).toString('utf8');
+      if (code === 0) {
+        resolve({ ok: true, stdout, stderr, exitCode: code });
+        return;
+      }
+      resolve({
+        ok: false,
+        stdout,
+        stderr,
+        exitCode: code,
+        error: stderr.trim() || stdout.trim() || `Codex exited with code ${code}`,
+      });
+    });
+  });
+}
+
 function getOutputDir(): string {
   const settings = readSettings();
   if (settings.outputDir) return settings.outputDir;
@@ -147,7 +200,9 @@ if (!gotLock) {
 
   app.whenReady().then(() => {
     loadEnv();
-    applyCodexHomeFromSettings(readSettings());
+    const initial = readSettings();
+    applyCodexHomeFromSettings(initial);
+    tasks.setConcurrency(initial.taskConcurrency);
     const win = createWindow();
 
     // Deliver any pending file-open events
@@ -206,8 +261,12 @@ ipcMain.handle('codex:run', async (event, { prompt, cwd, sandboxMode, modelOverr
   try {
     const saved = readSettings();
     const effectiveSandboxMode = isSandboxMode(sandboxMode) ? sandboxMode : saved.sandboxMode;
-    const effectiveModelOverride =
-      typeof modelOverride === 'string' ? modelOverride : typeof saved.modelOverride === 'string' ? saved.modelOverride : null;
+    let effectiveModelOverride: string | null = null;
+    if (typeof modelOverride === 'string') {
+      effectiveModelOverride = modelOverride;
+    } else if (typeof saved.modelOverride === 'string') {
+      effectiveModelOverride = saved.modelOverride;
+    }
     const result = await runTask(
       { prompt, cwd, sandboxMode: effectiveSandboxMode, modelOverride: effectiveModelOverride },
       append
@@ -215,6 +274,101 @@ ipcMain.handle('codex:run', async (event, { prompt, cwd, sandboxMode, modelOverr
     return { ok: true, text: result };
   } catch (err: any) {
     return { ok: false, error: err?.message || String(err) };
+  }
+});
+
+ipcMain.handle('codex:taskList', async () => {
+  return { ok: true, tasks: tasks.listTasks() };
+});
+
+ipcMain.handle('codex:taskEnqueue', async (_event, payload: EnqueueTaskPayload) => {
+  try {
+    if (!payload || typeof payload !== 'object') return { ok: false, error: 'Missing payload' };
+    if (typeof payload.userPrompt !== 'string' || !payload.userPrompt.trim()) return { ok: false, error: 'Missing prompt' };
+    if (typeof payload.effectivePrompt !== 'string' || !payload.effectivePrompt.trim())
+      return { ok: false, error: 'Missing effective prompt' };
+
+    const saved = readSettings();
+    const sandboxMode = isSandboxMode((payload as any).sandboxMode) ? (payload as any).sandboxMode : saved.sandboxMode;
+    let model: string | null = null;
+    if (typeof (payload as any).model === 'string') {
+      model = (payload as any).model as string;
+    } else if (typeof saved.modelOverride === 'string') {
+      model = saved.modelOverride;
+    }
+	    const includePlanTool =
+	      typeof (payload as any).includePlanTool === 'boolean' ? (payload as any).includePlanTool : saved.experimentalPlanTool;
+	    const enableSearch =
+	      typeof (payload as any).enableSearch === 'boolean' ? (payload as any).enableSearch : saved.experimentalSearch;
+	    const baseOverrides = Array.isArray((payload as any).configOverrides)
+	      ? (payload as any).configOverrides.filter((v: unknown) => typeof v === 'string')
+	      : saved.experimentalConfigOverrides;
+	    const configOverrides = Array.isArray(baseOverrides) ? [...baseOverrides] : [];
+	    if (saved.allowOutsideWorkspaceRead && sandboxMode !== 'danger-full-access') {
+	      const alreadyOverridesSandboxPermissions = configOverrides.some((o) => typeof o === 'string' && o.includes('sandbox_permissions'));
+	      if (!alreadyOverridesSandboxPermissions) {
+	        configOverrides.unshift('sandbox_permissions=["disk-full-read-access"]');
+	      }
+	    }
+
+    let cwd = typeof payload.cwd === 'string' && payload.cwd.trim() ? payload.cwd.trim() : null;
+    if (cwd) {
+      try {
+        const resolved = path.resolve(cwd);
+        const stats = fs.statSync(resolved);
+        if (!stats.isDirectory()) cwd = null;
+        else cwd = resolved;
+      } catch {
+        cwd = null;
+      }
+    }
+
+    const task = tasks.enqueue({
+      ...payload,
+      cwd,
+      sandboxMode,
+      model,
+      includePlanTool,
+      enableSearch,
+      configOverrides,
+    });
+    return { ok: true, taskId: task.id, task };
+  } catch (e: any) {
+    return { ok: false, error: e?.message || String(e) };
+  }
+});
+
+ipcMain.handle('codex:taskCancel', async (_event, taskId: string) => {
+  if (!taskId || typeof taskId !== 'string') return { ok: false, error: 'Missing task id' };
+  return tasks.cancel(taskId);
+});
+
+ipcMain.handle('codex:taskResume', async (_event, payload: { taskId: string; prompt: string }) => {
+  const taskId = payload?.taskId;
+  const prompt = payload?.prompt;
+  if (!taskId || typeof taskId !== 'string') return { ok: false, error: 'Missing task id' };
+  if (typeof prompt !== 'string' || !prompt.trim()) return { ok: false, error: 'Missing prompt' };
+  return tasks.resume(taskId, prompt);
+});
+
+ipcMain.handle('codex:listSkills', async (_event, payload?: { cwd?: string | null }) => {
+  try {
+    let cwd = typeof payload?.cwd === 'string' && payload.cwd.trim() ? payload.cwd.trim() : null;
+    if (cwd) {
+      try {
+        const resolved = path.resolve(cwd);
+        const stats = fs.statSync(resolved);
+        if (!stats.isDirectory()) cwd = null;
+        else cwd = resolved;
+      } catch {
+        cwd = null;
+      }
+    }
+    if (!cwd) cwd = readSettings().workspaceDir;
+    if (!cwd) return { ok: true, skills: [] };
+    return { ok: true, skills: listWorkspaceSkills(cwd) };
+  } catch (e: any) {
+    return { ok: false, error: e?.message || String(e) };
   }
 });
 
@@ -235,6 +389,94 @@ ipcMain.handle('codex:openConfig', async () => {
 ipcMain.handle('codex:openMcpDocs', async () => {
   await shell.openExternal('https://developers.openai.com/codex/mcp/');
   return { ok: true };
+});
+
+ipcMain.handle('codex:mcpList', async () => {
+  try {
+    applyCodexHomeFromSettings(readSettings());
+    const res = await runBundledCodex(['mcp', 'list', '--json']);
+    if (!res.ok) return { ok: false, error: res.error || 'Failed to list MCP servers' };
+    const servers = JSON.parse(res.stdout);
+    if (!Array.isArray(servers)) return { ok: false, error: 'Unexpected MCP list output' };
+    return { ok: true, servers };
+  } catch (e: any) {
+    return { ok: false, error: e?.message || String(e) };
+  }
+});
+
+ipcMain.handle('codex:mcpGet', async (_event, name: string) => {
+  try {
+    if (!name || typeof name !== 'string') return { ok: false, error: 'Missing name' };
+    applyCodexHomeFromSettings(readSettings());
+    const res = await runBundledCodex(['mcp', 'get', '--json', name]);
+    if (!res.ok) return { ok: false, error: res.error || 'Failed to get MCP server' };
+    const server = JSON.parse(res.stdout);
+    return { ok: true, server };
+  } catch (e: any) {
+    return { ok: false, error: e?.message || String(e) };
+  }
+});
+
+ipcMain.handle(
+  'codex:mcpAdd',
+  async (
+    _event,
+    payload:
+      | { name: string; transport: 'stdio'; command: string; args?: string[]; env?: string[] }
+      | { name: string; transport: 'http'; url: string; bearerTokenEnvVar?: string | null }
+  ) => {
+    try {
+      const name = payload?.name;
+      const transport = payload?.transport;
+      if (!name || typeof name !== 'string') return { ok: false, error: 'Missing name' };
+      if (transport !== 'stdio' && transport !== 'http') return { ok: false, error: 'Missing transport' };
+
+      applyCodexHomeFromSettings(readSettings());
+
+      const args: string[] = ['mcp', 'add'];
+      if (transport === 'http') {
+        const url = (payload as any).url;
+        if (!url || typeof url !== 'string') return { ok: false, error: 'Missing URL' };
+        args.push('--url', url);
+        const bearerTokenEnvVar = (payload as any).bearerTokenEnvVar;
+        if (typeof bearerTokenEnvVar === 'string' && bearerTokenEnvVar.trim()) {
+          args.push('--bearer-token-env-var', bearerTokenEnvVar.trim());
+        }
+        args.push(name);
+      } else {
+        const command = (payload as any).command;
+        if (!command || typeof command !== 'string') return { ok: false, error: 'Missing command' };
+        const env = Array.isArray((payload as any).env) ? (payload as any).env.filter((v: unknown) => typeof v === 'string') : [];
+        for (const e of env) {
+          const trimmed = e.trim();
+          if (!trimmed) continue;
+          args.push('--env', trimmed);
+        }
+        const commandArgs = Array.isArray((payload as any).args)
+          ? (payload as any).args.filter((v: unknown) => typeof v === 'string' && v.trim())
+          : [];
+        args.push(command, ...commandArgs, name);
+      }
+
+      const res = await runBundledCodex(args);
+      if (!res.ok) return { ok: false, error: res.error || 'Failed to add MCP server' };
+      return { ok: true };
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) };
+    }
+  }
+);
+
+ipcMain.handle('codex:mcpRemove', async (_event, name: string) => {
+  try {
+    if (!name || typeof name !== 'string') return { ok: false, error: 'Missing name' };
+    applyCodexHomeFromSettings(readSettings());
+    const res = await runBundledCodex(['mcp', 'remove', name]);
+    if (!res.ok) return { ok: false, error: res.error || 'Failed to remove MCP server' };
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: e?.message || String(e) };
+  }
 });
 
 ipcMain.handle('codex:saveApiKey', async (_e, key: string) => {
@@ -291,7 +533,12 @@ ipcMain.handle('codex:getEnvInfo', async () => {
   const openAiKey = process.env.OPENAI_API_KEY;
   const codexKey = process.env.CODEX_API_KEY;
   const apiKeyPresent = !!(openAiKey || codexKey);
-  const apiKeyName = openAiKey ? 'OPENAI_API_KEY' : codexKey ? 'CODEX_API_KEY' : null;
+  let apiKeyName: 'OPENAI_API_KEY' | 'CODEX_API_KEY' | null = null;
+  if (openAiKey) {
+    apiKeyName = 'OPENAI_API_KEY';
+  } else if (codexKey) {
+    apiKeyName = 'CODEX_API_KEY';
+  }
   const stubMode = process.env.CODEX_DESKTOP_FORCE_STUB === '1';
   return { ok: true, envPath: resolveEnvPath(), apiKeyPresent, apiKeyName, stubMode };
 });
@@ -312,9 +559,21 @@ ipcMain.handle('codex:updateSettings', async (_e, patch: Partial<AppSettings>) =
     if (typeof patch?.modelOverride === 'string' || patch?.modelOverride === null) next.modelOverride = patch.modelOverride;
     if (patch?.codexHomeMode === 'app' || patch?.codexHomeMode === 'global') next.codexHomeMode = patch.codexHomeMode;
     if (typeof patch?.includeFileContents === 'boolean') next.includeFileContents = patch.includeFileContents;
+    if (typeof (patch as any)?.allowOutsideWorkspaceRead === 'boolean')
+      next.allowOutsideWorkspaceRead = (patch as any).allowOutsideWorkspaceRead;
+    if (typeof (patch as any)?.taskConcurrency === 'number') next.taskConcurrency = (patch as any).taskConcurrency;
+    if (typeof (patch as any)?.experimentalSearch === 'boolean') next.experimentalSearch = (patch as any).experimentalSearch;
+    if (typeof (patch as any)?.experimentalPlanTool === 'boolean') next.experimentalPlanTool = (patch as any).experimentalPlanTool;
+    if (Array.isArray((patch as any)?.experimentalConfigOverrides)) {
+      next.experimentalConfigOverrides = (patch as any).experimentalConfigOverrides.filter((v: unknown) => typeof v === 'string');
+    }
+    if (Array.isArray((patch as any)?.selectedSkills)) {
+      next.selectedSkills = (patch as any).selectedSkills.filter((v: unknown) => typeof v === 'string');
+    }
     if (isSandboxMode((patch as any)?.sandboxMode)) next.sandboxMode = (patch as any).sandboxMode;
     const updated = updateSettings(next);
     applyCodexHomeFromSettings(updated);
+    tasks.setConcurrency(updated.taskConcurrency);
     return { ok: true, settings: updated };
   } catch (e: any) {
     return { ok: false, error: e?.message || String(e) };
@@ -358,11 +617,22 @@ ipcMain.handle(
   'codex:plan',
   async (
     _e,
-    payload: { prompt: string; files?: { name: string }[]; cwd?: string; sandboxMode?: SandboxMode; modelOverride?: string | null }
+    payload: {
+      prompt: string;
+      files?: { name: string }[];
+      cwd?: string;
+      sandboxMode?: SandboxMode;
+      modelOverride?: string | null;
+      // optional overrides; most values default to Settings
+      enableSearch?: boolean;
+      includePlanTool?: boolean;
+      selectedSkills?: string[];
+    }
   ) => {
   const files = payload?.files || [];
   const stubMode = process.env.CODEX_DESKTOP_FORCE_STUB === '1';
   const apiKeyPresent = getApiKeyPresent();
+  const saved = readSettings();
   let cwd = payload?.cwd;
   if (cwd) {
     try {
@@ -374,14 +644,23 @@ ipcMain.handle(
       cwd = undefined;
     }
   }
-  const sandboxMode = isSandboxMode(payload?.sandboxMode) ? payload.sandboxMode : readSettings().sandboxMode;
-  const modelOverride = typeof payload?.modelOverride === 'string' ? payload.modelOverride.trim() : null;
-  const steps = [
-    { id: 'parse', text: 'Parse inputs and understand intent' },
-    cwd ? { id: 'cwd', text: `Work in folder: ${cwd}` } : null,
-    files.length > 0 ? { id: 'read', text: `Read ${files.length} file(s)` } : { id: 'noop', text: 'No external files' },
-    !stubMode && !apiKeyPresent ? { id: 'key', text: 'Configure API key in Settings' } : null,
+	  const sandboxMode = isSandboxMode(payload?.sandboxMode) ? payload.sandboxMode : saved.sandboxMode;
+	  const modelOverride = typeof payload?.modelOverride === 'string' ? payload.modelOverride.trim() : saved.modelOverride?.trim() || null;
+	  const enableSearch = typeof payload?.enableSearch === 'boolean' ? payload.enableSearch : saved.experimentalSearch;
+	  const includePlanTool = typeof payload?.includePlanTool === 'boolean' ? payload.includePlanTool : saved.experimentalPlanTool;
+	  const selectedSkills = Array.isArray(payload?.selectedSkills) ? payload.selectedSkills : saved.selectedSkills;
+	  const allowOutsideWorkspaceRead = !!saved.allowOutsideWorkspaceRead && sandboxMode !== 'danger-full-access';
+	  const steps = [
+	    { id: 'parse', text: 'Parse inputs and understand intent' },
+	    cwd ? { id: 'cwd', text: `Work in folder: ${cwd}` } : null,
+	    allowOutsideWorkspaceRead ? { id: 'outside-read', text: 'May read files outside the selected folder (full disk read)' } : null,
+	    selectedSkills?.length ? { id: 'skills', text: `Use ${selectedSkills.length} skill(s)` } : null,
+	    files.length > 0 ? { id: 'read', text: `Read ${files.length} file(s)` } : { id: 'noop', text: 'No external files' },
+	    !stubMode && !apiKeyPresent ? { id: 'key', text: 'Configure API key in Settings' } : null,
+	    enableSearch ? { id: 'search', text: 'Enable web search' } : null,
+    includePlanTool ? { id: 'plan-tool', text: 'Enable plan tool (todos)' } : null,
     { id: 'gen', text: 'Generate artifact' },
+    sandboxMode === 'danger-full-access' ? { id: 'full-disk', text: 'May access files outside the selected folder' } : null,
     sandboxMode !== 'read-only' ? { id: 'writes', text: `Potentially write files (${sandboxMode})` } : null,
     modelOverride ? { id: 'model', text: `Use model override: ${modelOverride}` } : null,
   ].filter(Boolean) as { id: string; text: string }[];
@@ -401,13 +680,19 @@ ipcMain.handle(
       required,
     };
   });
-  const permissions = [
-    ...(files.length
-      ? [{ id: 'read-files', label: `Read ${files.length} file(s)`, required: true }]
-      : []),
-    ...(!stubMode ? [{ id: 'network', label: 'Network access (model call)', required: true }] : []),
-    ...(sandboxMode !== 'read-only' ? [{ id: 'write-workspace', label: `Write files (${sandboxMode})`, required: true }] : []),
-    ...mcpPermissions,
+	  const permissions = [
+	    ...(files.length
+	      ? [{ id: 'read-files', label: `Read ${files.length} file(s)`, required: true }]
+	      : []),
+	    ...(!stubMode ? [{ id: 'network', label: 'Network access (model call)', required: true }] : []),
+	    ...(allowOutsideWorkspaceRead
+	      ? [{ id: 'full-disk-read', label: 'Read files outside the selected folder (full disk read)', required: true }]
+	      : []),
+	    ...(sandboxMode === 'danger-full-access'
+	      ? [{ id: 'full-disk', label: 'Access files outside the selected folder (full disk)', required: true }]
+	      : []),
+	    ...(sandboxMode !== 'read-only' ? [{ id: 'write-workspace', label: `Write files (${sandboxMode})`, required: true }] : []),
+	    ...mcpPermissions,
   ];
   const sources = [...(cwd ? [cwd] : []), ...files.map((f) => f.name)];
   return { ok: true, plan: { steps, permissions, sources } };

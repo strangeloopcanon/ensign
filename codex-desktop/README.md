@@ -62,7 +62,8 @@ Artifacts land in `release/` and the runnable unpacked apps live under `release/
 - **Command bar** accepts text and drag-and-drop files.
 - **Toolbar** shows folder/model/LLM readiness and provides quick access to folder selection + Settings.
 - **Execution plan** modal shows the dry-run plan, detected permissions (files, network, MCP connectors), and sources. Required items must be checked before **Run** enables.
-- **Canvas** renders the working artifact; when a source file is provided the diff view highlights changes line-by-line.
+- **Canvas** renders the working artifact for the selected task; when a source file is provided the diff view highlights changes line-by-line.
+- **Tasks drawer** shows queued/running/completed tasks, a structured Activity log (commands/files/MCP/search/todos), and the plan for the selected task.
 - **Action bar** provides Save As / Undo / Redo. Saves are versioned under `~/Documents/AI Output/`.
 
 ## OS Hooks
@@ -84,6 +85,15 @@ Artifacts land in `release/` and the runnable unpacked apps live under `release/
 
 ## Stub mode
 Set `CODEX_DESKTOP_FORCE_STUB=1` to run in deterministic stub mode (no network/model calls). This is mainly for UI testing and demos.
+
+## Skills (prompt packs)
+Ensign supports lightweight “skills” that act as instruction packs injected into the task prompt.
+
+- **Where:** put skills under your workspace folder at `.ensign/skills/<skill-id>/SKILL.md`.
+- **Format:** optional YAML frontmatter, then Markdown instructions:
+  - `name:` (optional)
+  - `description:` (optional)
+- **Enable:** Settings → Advanced → Skills (select one or more).
 
 ## Testing
 Playwright exercises the core flows end-to-end.

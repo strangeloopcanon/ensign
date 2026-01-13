@@ -16,7 +16,8 @@ function groupPermissions(perms: Permission[]): PermissionGroup[] {
 
   for (const p of perms) {
     if (p.id === 'network') network.push(p);
-    else if (p.id === 'read-files' || p.id === 'write-workspace') files.push(p);
+    else if (p.id === 'read-files' || p.id === 'write-workspace' || p.id === 'full-disk' || p.id === 'full-disk-read')
+      files.push(p);
     else if (p.id.startsWith('mcp-')) connectors.push(p);
     else other.push(p);
   }
@@ -53,7 +54,7 @@ export function PlanReviewModal({
   onOpenSettings,
   onGrantChange,
   onRun,
-}: Props) {
+}: Props): JSX.Element | null {
   const overlayRef = React.useRef<HTMLDivElement | null>(null);
 
   React.useEffect(() => {
@@ -160,4 +161,3 @@ export function PlanReviewModal({
     </div>
   );
 }
-
