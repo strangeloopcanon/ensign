@@ -314,7 +314,7 @@ export class TaskManager {
     }
     this.running.set(taskId, rt);
 
-    const stubMode = process.env.ENSIGN_DESKTOP_FORCE_STUB === '1' || process.env.CODEX_DESKTOP_FORCE_STUB === '1';
+    const stubMode = process.env.ENSIGN_DESKTOP_FORCE_STUB === '1';
     if (stubMode) {
       rt.stubTimer = setTimeout(() => {
         if (rt.canceled) return;

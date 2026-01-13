@@ -37,6 +37,7 @@ function upsertById<T extends { id: string }>(items: T[], next: T): T[] {
 
 const DEFAULT_SETTINGS: Settings = {
   workspaceDir: null,
+  additionalWritableRoots: [],
   outputDir: null,
   modelOverride: 'gpt-5.2',
   codexHomeMode: 'app',
@@ -119,6 +120,7 @@ function App() {
       sandboxMode: settings.sandboxMode,
       modelOverride: settings.modelOverride,
       allowOutsideWorkspaceRead: settings.allowOutsideWorkspaceRead,
+      additionalWritableRoots: (settings.additionalWritableRoots || []).join('|'),
       selectedSkills: (settings.selectedSkills || []).join('|'),
       experimentalSearch: settings.experimentalSearch,
       experimentalPlanTool: settings.experimentalPlanTool,
@@ -131,6 +133,7 @@ function App() {
     settings.experimentalPlanTool,
     settings.experimentalSearch,
     settings.allowOutsideWorkspaceRead,
+    settings.additionalWritableRoots,
     settings.modelOverride,
     settings.sandboxMode,
     settings.selectedSkills,

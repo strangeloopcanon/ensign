@@ -6,6 +6,7 @@ export type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access'
 
 export type AppSettings = {
   workspaceDir: string | null;
+  additionalWritableRoots: string[];
   outputDir: string | null;
   modelOverride: string | null;
   codexHomeMode: 'app' | 'global';
@@ -28,8 +29,28 @@ function defaultWorkspaceDir(): string | null {
   }
 }
 
+function normalizeDirectoryList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const unique = new Set<string>();
+  for (const entry of value) {
+    if (typeof entry !== 'string') continue;
+    const trimmed = entry.trim();
+    if (!trimmed) continue;
+    const resolved = path.resolve(trimmed);
+    try {
+      const st = fs.statSync(resolved);
+      if (!st.isDirectory()) continue;
+    } catch {
+      continue;
+    }
+    unique.add(resolved);
+  }
+  return Array.from(unique);
+}
+
 const DEFAULT_SETTINGS: AppSettings = {
   workspaceDir: null,
+  additionalWritableRoots: [],
   outputDir: null,
   modelOverride: 'gpt-5.2',
   codexHomeMode: 'app',
@@ -59,6 +80,7 @@ export function readSettings(): AppSettings {
       ...(parsed as Partial<AppSettings>),
     };
     merged.allowOutsideWorkspaceRead = !!merged.allowOutsideWorkspaceRead;
+    merged.additionalWritableRoots = normalizeDirectoryList((merged as any).additionalWritableRoots);
     if (!Number.isFinite(merged.taskConcurrency) || merged.taskConcurrency < 1) merged.taskConcurrency = DEFAULT_SETTINGS.taskConcurrency;
     merged.taskConcurrency = Math.max(1, Math.min(8, Math.floor(merged.taskConcurrency)));
     if (!Array.isArray(merged.experimentalConfigOverrides)) merged.experimentalConfigOverrides = DEFAULT_SETTINGS.experimentalConfigOverrides;
@@ -73,6 +95,7 @@ export function readSettings(): AppSettings {
 
 export function writeSettings(next: AppSettings): AppSettings {
   const merged: AppSettings = { ...DEFAULT_SETTINGS, ...next };
+  merged.additionalWritableRoots = normalizeDirectoryList((merged as any).additionalWritableRoots);
   const p = settingsPath();
   const dir = path.dirname(p);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
