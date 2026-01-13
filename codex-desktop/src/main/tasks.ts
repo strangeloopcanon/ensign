@@ -100,6 +100,10 @@ function broadcast(channel: string, payload: unknown) {
   }
 }
 
+function broadcastTaskUpdated(taskId: string, patch: Record<string, unknown>) {
+  broadcast('codex:taskEvent', { type: 'task.updated', taskId, patch });
+}
+
 function getApiKey(): string | null {
   return process.env.OPENAI_API_KEY || process.env.CODEX_API_KEY || null;
 }
@@ -126,6 +130,10 @@ function asTaskItem(raw: any): TaskItem | null {
   if (!raw || typeof raw !== 'object') return null;
   if (typeof raw.id !== 'string' || typeof raw.type !== 'string') return null;
   return raw as TaskItem;
+}
+
+function syncTaskItems(task: TaskSummary, rt: TaskRuntime) {
+  task.items = rt.itemsOrder.map((id) => rt.itemsById.get(id)!).filter(Boolean);
 }
 
 function lastAssistantText(task: TaskSummary): string | null {
@@ -228,11 +236,7 @@ export class TaskManager {
     task.startedAt = null;
     task.endedAt = null;
     task.error = null;
-    broadcast('codex:taskEvent', {
-      type: 'task.updated',
-      taskId,
-      patch: { status: task.status, startedAt: task.startedAt, endedAt: task.endedAt, error: task.error },
-    });
+    broadcastTaskUpdated(taskId, { status: task.status, startedAt: task.startedAt, endedAt: task.endedAt, error: task.error });
 
     this.queue.push({ taskId, kind: 'resume', prompt: userPrompt.trim() });
     this.drain();
@@ -249,7 +253,7 @@ export class TaskManager {
       this.queue.splice(queuedIdx, 1);
       task.status = 'canceled';
       task.endedAt = now();
-      broadcast('codex:taskEvent', { type: 'task.updated', taskId, patch: { status: task.status, endedAt: task.endedAt } });
+      broadcastTaskUpdated(taskId, { status: task.status, endedAt: task.endedAt });
       broadcast('codex:taskEvent', { type: 'task.finished', taskId });
       return { ok: true };
     }
@@ -267,7 +271,7 @@ export class TaskManager {
     }
     task.status = 'canceled';
     task.endedAt = now();
-    broadcast('codex:taskEvent', { type: 'task.updated', taskId, patch: { status: task.status, endedAt: task.endedAt } });
+    broadcastTaskUpdated(taskId, { status: task.status, endedAt: task.endedAt });
     broadcast('codex:taskEvent', { type: 'task.finished', taskId });
     this.running.delete(taskId);
     this.drain();
@@ -289,11 +293,7 @@ export class TaskManager {
     task.startedAt = now();
     task.endedAt = null;
     task.error = null;
-    broadcast('codex:taskEvent', {
-      type: 'task.updated',
-      taskId,
-      patch: { status: task.status, startedAt: task.startedAt, endedAt: task.endedAt, error: task.error },
-    });
+    broadcastTaskUpdated(taskId, { status: task.status, startedAt: task.startedAt, endedAt: task.endedAt, error: task.error });
 
     const rt: TaskRuntime = {
       taskId,
@@ -339,18 +339,16 @@ export class TaskManager {
       return;
     }
 
-    const includePlanTool = task.includePlanTool;
-    const enableSearch = task.enableSearch;
     const configOverrides = Array.isArray(task.configOverrides) ? task.configOverrides : [];
 
     const args: string[] = [];
-    if (enableSearch) args.push('--search');
+    if (task.enableSearch) args.push('--search');
     args.push('exec', '--json');
     if (task.model) args.push('--model', task.model);
     args.push('--sandbox', task.sandboxMode);
     if (task.cwd) args.push('--cd', task.cwd);
     args.push('--skip-git-repo-check');
-    if (includePlanTool) args.push('--include-plan-tool');
+    if (task.includePlanTool) args.push('--include-plan-tool');
     for (const o of configOverrides) {
       if (typeof o !== 'string') continue;
       const trimmed = o.trim();
@@ -421,30 +419,34 @@ export class TaskManager {
   private onCodexEvent(taskId: string, task: TaskSummary, rt: TaskRuntime, ev: any) {
     if (rt.canceled) return;
     const type = String(ev?.type || '');
-    if (type === 'thread.started') {
-      const threadId = typeof ev?.thread_id === 'string' ? ev.thread_id : null;
-      if (threadId && task.threadId !== threadId) {
-        task.threadId = threadId;
-        rt.threadId = threadId;
-        broadcast('codex:taskEvent', { type: 'task.updated', taskId, patch: { threadId } });
+    switch (type) {
+      case 'thread.started': {
+        const threadId = typeof ev?.thread_id === 'string' ? ev.thread_id : null;
+        if (threadId && task.threadId !== threadId) {
+          task.threadId = threadId;
+          rt.threadId = threadId;
+          broadcastTaskUpdated(taskId, { threadId });
+        }
+        return;
       }
-      return;
-    }
-    if (type === 'error') {
-      const message = typeof ev?.message === 'string' ? ev.message.trim() : '';
-      if (message) {
-        const item: TaskItem = { id: randomId('error'), type: 'error', status: 'failed', message };
-        rt.itemsById.set(item.id, item);
-        rt.itemsOrder.push(item.id);
-        task.items = rt.itemsOrder.map((id) => rt.itemsById.get(id)!).filter(Boolean);
-        broadcast('codex:taskEvent', { type: 'task.item', taskId, item, eventType: type });
+      case 'error': {
+        const message = typeof ev?.message === 'string' ? ev.message.trim() : '';
+        if (message) {
+          const item: TaskItem = { id: randomId('error'), type: 'error', status: 'failed', message };
+          rt.itemsById.set(item.id, item);
+          rt.itemsOrder.push(item.id);
+          syncTaskItems(task, rt);
+          broadcast('codex:taskEvent', { type: 'task.item', taskId, item, eventType: type });
+        }
+        return;
       }
-      return;
-    }
-    if (type === 'turn.failed') {
-      rt.turnFailure = String(ev?.error?.message || 'Turn failed');
-      broadcast('codex:taskEvent', { type: 'task.turnFailed', taskId, error: rt.turnFailure });
-      return;
+      case 'turn.failed': {
+        rt.turnFailure = String(ev?.error?.message || 'Turn failed');
+        broadcast('codex:taskEvent', { type: 'task.turnFailed', taskId, error: rt.turnFailure });
+        return;
+      }
+      default:
+        break;
     }
 
     if (type !== 'item.started' && type !== 'item.updated' && type !== 'item.completed') return;
@@ -455,7 +457,7 @@ export class TaskManager {
       rt.itemsOrder.push(item.id);
     }
     rt.itemsById.set(item.id, item);
-    task.items = rt.itemsOrder.map((id) => rt.itemsById.get(id)!).filter(Boolean);
+    syncTaskItems(task, rt);
 
     if (item.type === 'agent_message' && typeof item.text === 'string') {
       const prev = rt.lastAgentTextById.get(item.id) ?? '';
@@ -479,11 +481,7 @@ export class TaskManager {
     if (finalError) {
       task.status = rt.canceled ? 'canceled' : 'failed';
       task.error = finalError;
-      broadcast('codex:taskEvent', {
-        type: 'task.updated',
-        taskId,
-        patch: { status: task.status, endedAt: task.endedAt, error: task.error },
-      });
+      broadcastTaskUpdated(taskId, { status: task.status, endedAt: task.endedAt, error: task.error });
     } else {
       if (rt.canceled) {
         task.status = 'canceled';
@@ -492,7 +490,7 @@ export class TaskManager {
       } else {
         task.status = 'completed';
       }
-      broadcast('codex:taskEvent', { type: 'task.updated', taskId, patch: { status: task.status, endedAt: task.endedAt } });
+      broadcastTaskUpdated(taskId, { status: task.status, endedAt: task.endedAt });
     }
 
     broadcast('codex:taskEvent', { type: 'task.finished', taskId });

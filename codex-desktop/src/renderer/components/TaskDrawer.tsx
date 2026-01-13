@@ -133,12 +133,22 @@ export function TaskDrawer({
     setResumeError(null);
   }, [selectedTaskId]);
 
-  const canResume =
-    !!selected &&
-    !!selected.threadId &&
+  const selectedCanResume =
+    selected != null &&
+    Boolean(selected.threadId) &&
     !resumeBusy &&
-    !!resumeText.trim() &&
+    resumeText.trim().length > 0 &&
     (selected.status === 'needs_input' || selected.status === 'completed' || selected.status === 'failed');
+
+  const selectedShowsResumeBox =
+    selected != null &&
+    Boolean(selected.threadId) &&
+    (selected.status === 'needs_input' || selected.status === 'completed' || selected.status === 'failed');
+
+  const resumeHintText =
+    selected?.status === 'needs_input'
+      ? 'The agent asked a question. Reply to continue.'
+      : 'Send a follow-up to continue this task.';
 
   return (
     <aside className={`planDrawer ${open ? 'open' : ''}`} data-testid="task-drawer">
@@ -223,10 +233,10 @@ export function TaskDrawer({
                 </div>
               ) : null}
 
-              {selected.threadId && (selected.status === 'needs_input' || selected.status === 'completed' || selected.status === 'failed') ? (
+              {selectedShowsResumeBox ? (
                 <div className="planFooter">
                   <div style={{ fontWeight: 600 }}>Resume</div>
-                  <div className="planHint">{selected.status === 'needs_input' ? 'The agent asked a question. Reply to continue.' : 'Send a follow-up to continue this task.'}</div>
+                  <div className="planHint">{resumeHintText}</div>
                   <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
                     <input
                       className="settingsInput"
@@ -237,7 +247,7 @@ export function TaskDrawer({
                       disabled={resumeBusy}
                     />
                     <button
-                      disabled={!canResume}
+                      disabled={!selectedCanResume}
                       onClick={async () => {
                         if (!selected) return;
                         const text = resumeText.trim();

@@ -43,6 +43,17 @@ type Props = {
   onToast?: (message: string, kind?: ToastKind) => void;
 };
 
+function splitNonEmptyLines(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function stringOrEmpty(value: unknown): string {
+  return value ? String(value) : '';
+}
+
 export function SettingsModal({
   open,
   settings,
@@ -74,6 +85,15 @@ export function SettingsModal({
   const [verifyState, setVerifyState] = React.useState<'idle' | 'verifying' | 'valid' | 'invalid'>('idle');
   const [verifyMessage, setVerifyMessage] = React.useState('');
   const keyInputRef = React.useRef<HTMLInputElement | null>(null);
+
+  const runWithBusy = React.useCallback(async (fn: () => Promise<void>) => {
+    setBusy(true);
+    try {
+      await fn();
+    } finally {
+      setBusy(false);
+    }
+  }, []);
 
   React.useEffect(() => {
     if (!open) return;
@@ -140,6 +160,13 @@ export function SettingsModal({
 
   const apiKeyPathSuffix = envInfo?.envPath ? ` • ${envInfo.envPath}` : '';
 
+  const canRemoveConnector = !busy && !!window.codex.mcpRemove;
+  const canAddConnector =
+    !busy &&
+    !!window.codex.mcpAdd &&
+    mcpAddName.trim().length > 0 &&
+    (mcpAddTransport === 'stdio' ? mcpAddCommand.trim().length > 0 : mcpAddUrl.trim().length > 0);
+
   return (
     <div className="modalOverlay" role="dialog" aria-label="Settings" onMouseDown={onClose}>
       <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
@@ -195,12 +222,9 @@ export function SettingsModal({
                       onClick={async () => {
                         const p = await onPickDirectory();
                         if (!p) return;
-                        setBusy(true);
-                        try {
+                        await runWithBusy(async () => {
                           await onSaveSettings({ workspaceDir: p });
-                        } finally {
-                          setBusy(false);
-                        }
+                        });
                       }}
                     >
                       Choose…
@@ -217,12 +241,9 @@ export function SettingsModal({
                     <button
                       disabled={busy || !settings.workspaceDir}
                       onClick={async () => {
-                        setBusy(true);
-                        try {
+                        await runWithBusy(async () => {
                           await onSaveSettings({ workspaceDir: null });
-                        } finally {
-                          setBusy(false);
-                        }
+                        });
                       }}
                     >
                       Clear
@@ -243,12 +264,9 @@ export function SettingsModal({
                       onClick={async () => {
                         const p = await onPickDirectory();
                         if (!p) return;
-                        setBusy(true);
-                        try {
+                        await runWithBusy(async () => {
                           await onSaveSettings({ outputDir: p });
-                        } finally {
-                          setBusy(false);
-                        }
+                        });
                       }}
                     >
                       Choose…
@@ -264,12 +282,9 @@ export function SettingsModal({
                     <button
                       disabled={busy || !settings.outputDir}
                       onClick={async () => {
-                        setBusy(true);
-                        try {
+                        await runWithBusy(async () => {
                           await onSaveSettings({ outputDir: null });
-                        } finally {
-                          setBusy(false);
-                        }
+                        });
                       }}
                     >
                       Reset
@@ -467,10 +482,7 @@ export function SettingsModal({
                       placeholder={'model=\"gpt-5.2\"'}
                       onChange={(e) =>
                         void onSaveSettings({
-                          experimentalConfigOverrides: e.target.value
-                            .split(/\\r?\\n/)
-                            .map((l) => l.trim())
-                            .filter(Boolean),
+                          experimentalConfigOverrides: splitNonEmptyLines(e.target.value),
                         })
                       }
                     />
@@ -534,8 +546,8 @@ export function SettingsModal({
                 {mcpServers.length ? (
                   <ul className="taskList" style={{ marginTop: 10 }}>
                     {mcpServers.map((s) => {
-                      const name = String(s?.name || '');
-                      const transportType = String(s?.transport?.type || '');
+                      const name = stringOrEmpty(s?.name);
+                      const transportType = stringOrEmpty(s?.transport?.type);
                       const subtitle =
                         transportType === 'http'
                           ? String(s?.transport?.url || 'http')
@@ -551,18 +563,15 @@ export function SettingsModal({
                           </div>
                           <button
                             className="taskCancel"
-                            disabled={busy}
+                            disabled={!canRemoveConnector}
                             onClick={async () => {
                               if (!window.codex.mcpRemove) return;
-                              setBusy(true);
-                              try {
+                              await runWithBusy(async () => {
                                 const r = await window.codex.mcpRemove(name);
                                 if (!r.ok) onToast?.(`Failed to remove connector: ${r.error || 'unknown error'}`, 'error');
                                 if (r.ok) onToast?.('Connector removed.', 'success');
                                 await refreshMcpServers();
-                              } finally {
-                                setBusy(false);
-                              }
+                              });
                             }}
                           >
                             Remove
@@ -702,16 +711,10 @@ export function SettingsModal({
 
                   <div className="settingsActions" style={{ marginTop: 10 }}>
                     <button
-                      disabled={
-                        busy ||
-                        !window.codex.mcpAdd ||
-                        !mcpAddName.trim() ||
-                        (mcpAddTransport === 'stdio' ? !mcpAddCommand.trim() : !mcpAddUrl.trim())
-                      }
+                      disabled={!canAddConnector}
                       onClick={async () => {
                         if (!window.codex.mcpAdd) return;
-                        setBusy(true);
-                        try {
+                        await runWithBusy(async () => {
                           if (mcpAddTransport === 'http') {
                             const r = await window.codex.mcpAdd({
                               name: mcpAddName.trim(),
@@ -722,14 +725,8 @@ export function SettingsModal({
                             if (!r.ok) onToast?.(`Failed to add connector: ${r.error || 'unknown error'}`, 'error');
                             if (r.ok) onToast?.('Connector added.', 'success');
                           } else {
-                            const args = mcpAddArgs
-                              .split(/\r?\n/)
-                              .map((l) => l.trim())
-                              .filter(Boolean);
-                            const env = mcpAddEnv
-                              .split(/\r?\n/)
-                              .map((l) => l.trim())
-                              .filter(Boolean);
+                            const args = splitNonEmptyLines(mcpAddArgs);
+                            const env = splitNonEmptyLines(mcpAddEnv);
                             const r = await window.codex.mcpAdd({
                               name: mcpAddName.trim(),
                               transport: 'stdio',
@@ -747,9 +744,7 @@ export function SettingsModal({
                           setMcpAddUrl('');
                           setMcpAddBearerEnvVar('');
                           await refreshMcpServers();
-                        } finally {
-                          setBusy(false);
-                        }
+                        });
                       }}
                     >
                       Add connector
@@ -780,15 +775,12 @@ export function SettingsModal({
                     <button
                       disabled={busy}
                       onClick={async () => {
-                        setBusy(true);
-                        try {
+                        await runWithBusy(async () => {
                           const r = await window.codex.initCodexConfig();
                           if (!r.ok) onToast?.(`Failed to initialize config: ${r.error || 'unknown error'}`, 'error');
                           if (r.ok) onToast?.('Config initialized.', 'success');
                           await onRefresh();
-                        } finally {
-                          setBusy(false);
-                        }
+                        });
                       }}
                     >
                       Initialize
@@ -796,15 +788,12 @@ export function SettingsModal({
                     <button
                       disabled={busy || settings.codexHomeMode !== 'app'}
                       onClick={async () => {
-                        setBusy(true);
-                        try {
+                        await runWithBusy(async () => {
                           const r = await window.codex.importGlobalCodexConfig();
                           if (!r.ok) onToast?.(`Failed to import config: ${r.error || 'unknown error'}`, 'error');
                           if (r.ok) onToast?.('Imported ~/.codex config.', 'success');
                           await onRefresh();
-                        } finally {
-                          setBusy(false);
-                        }
+                        });
                       }}
                     >
                       Import from ~/.codex
