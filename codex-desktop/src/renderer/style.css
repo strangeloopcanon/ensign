@@ -22,6 +22,10 @@ body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; marg
 .toolbar { padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; gap: 10px; border-bottom: 1px solid #4443; }
 .toolbarLeft, .toolbarRight { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .badge { border-radius: 999px; border: 1px solid #4443; padding: 3px 10px; font-size: 12px; background: color-mix(in srgb, Canvas 85%, CanvasText 15%); }
+.badgeButton { appearance: none; cursor: pointer; padding: 3px 10px; }
+.badgeButton:hover { border-color: #0a84ff88; }
+.badgeButton:disabled { opacity: 0.7; cursor: default; }
+.badgeWarning { border-color: #f5a62388; background: #f5a62322; }
 
 /* Middle area: canvas + plan drawer */
 .content { display: grid; grid-template-columns: 1fr auto; height: 100%; }
@@ -75,6 +79,18 @@ body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; marg
 .activitySummary { font-size: 12px; }
 .activityMeta { display: flex; gap: 6px; align-items: center; font-size: 11px; opacity: 0.8; flex-wrap: wrap; }
 .activityCode { opacity: 0.9; }
+.todoList { list-style: none; padding: 0; margin: 6px 0 0; display: grid; gap: 6px; }
+.todoItem { display: flex; gap: 8px; align-items: flex-start; font-size: 12px; }
+.todoItem.done { opacity: 0.65; }
+.todoMark { width: 14px; text-align: center; margin-top: 1px; }
+.todoText { overflow-wrap: anywhere; }
+.fileChangeList { list-style: none; padding: 0; margin: 6px 0 0; display: grid; gap: 6px; }
+.fileChange { display: flex; gap: 8px; align-items: center; }
+.fileKind { width: 14px; text-align: center; font-weight: 600; opacity: 0.9; }
+.fileChange.add .fileKind { color: #2ecc71; }
+.fileChange.delete .fileKind { color: #ff3b30; }
+.fileChange.update .fileKind { opacity: 0.75; }
+.filePathButton { font-size: 12px; text-align: left; overflow-wrap: anywhere; }
 
 /* Action bar */
 .actionBar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-top: 1px solid #4443; }

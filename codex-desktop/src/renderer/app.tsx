@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { CommandBar } from './components/CommandBar';
 import { Canvas } from './components/Canvas';
@@ -7,7 +7,7 @@ import type { Plan } from './components/PlanDrawer';
 import { PlanReviewModal } from './components/PlanReviewModal';
 import { ActionBar } from './components/ActionBar';
 import { HomeTemplates } from './components/HomeTemplates';
-import { TaskDrawer, type Task } from './components/TaskDrawer';
+import { TaskDrawer, type Task, type TaskStatus } from './components/TaskDrawer';
 import { SettingsModal, type Settings, type SettingsTab } from './components/SettingsModal';
 import { SaveAsModal } from './components/SaveAsModal';
 import { ToastHost, type Toast, type ToastKind } from './components/ToastHost';
@@ -73,6 +73,8 @@ function App() {
   const [saveSuggestedName, setSaveSuggestedName] = useState('artifact');
   const [saveBusy, setSaveBusy] = useState(false);
   const [, setRunningTick] = useState(0);
+  const previousTaskStatusesRef = useRef<Record<string, TaskStatus>>({});
+  const taskStatusesHydratedRef = useRef(false);
 
   const dismissToast = React.useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -101,6 +103,11 @@ function App() {
   const openSettings = React.useCallback((tab: SettingsTab = 'general') => {
     setSettingsDefaultTab(tab);
     setSettingsOpen(true);
+  }, []);
+
+  const focusTask = React.useCallback((taskId: string) => {
+    setSelectedTaskId(taskId);
+    setTaskDrawerOpen(true);
   }, []);
 
   const plannedInputsKey = useMemo(() => {
@@ -215,6 +222,50 @@ function App() {
       try { unsubTask && unsubTask(); } catch {}
     };
   }, [refreshStatus]);
+
+  useEffect(() => {
+    const nextStatuses: Record<string, TaskStatus> = {};
+    for (const t of tasks) nextStatuses[t.id] = t.status;
+
+    if (!taskStatusesHydratedRef.current) {
+      taskStatusesHydratedRef.current = true;
+      previousTaskStatusesRef.current = nextStatuses;
+      return;
+    }
+
+    const prevStatuses = previousTaskStatusesRef.current;
+    previousTaskStatusesRef.current = nextStatuses;
+
+    for (const t of tasks) {
+      const prev = prevStatuses[t.id];
+      if (!prev) continue;
+      if (prev === t.status) continue;
+
+      if (t.status === 'needs_input') {
+        pushToast(`Needs input: ${t.title}`, 'info', {
+          actionLabel: 'Open',
+          onAction: () => focusTask(t.id),
+          ttlMs: 12_000,
+        });
+        continue;
+      }
+      if (t.status === 'completed') {
+        pushToast(`Done: ${t.title}`, 'success', {
+          actionLabel: 'View',
+          onAction: () => focusTask(t.id),
+          ttlMs: 8_000,
+        });
+        continue;
+      }
+      if (t.status === 'failed') {
+        pushToast(`Failed: ${t.title}`, 'error', {
+          actionLabel: 'View',
+          onAction: () => focusTask(t.id),
+          ttlMs: 12_000,
+        });
+      }
+    }
+  }, [focusTask, pushToast, tasks]);
 
   useEffect(() => {
     const anyRunning = tasks.some((t) => t.status === 'running');
@@ -386,6 +437,16 @@ function App() {
   const needsApiKey = !!envInfo && !envInfo.apiKeyPresent && !envInfo.stubMode;
   const runningTasks = tasks.filter((t) => t.status === 'running').length;
   const queuedTasks = tasks.filter((t) => t.status === 'queued').length;
+  const { needsInputCount, mostRecentNeedsInputTask } = useMemo(() => {
+    let count = 0;
+    let best: Task | null = null;
+    for (const t of tasks) {
+      if (t.status !== 'needs_input') continue;
+      count += 1;
+      if (!best || t.createdAt > best.createdAt) best = t;
+    }
+    return { needsInputCount: count, mostRecentNeedsInputTask: best };
+  }, [tasks]);
   const runningSeconds =
     selectedTask?.status === 'running' && selectedTask.startedAt != null
       ? Math.max(0, Math.floor((Date.now() - selectedTask.startedAt) / 1000))
@@ -443,6 +504,24 @@ function App() {
           <span className="badge">
             {llmBadgeText}
           </span>
+          {status ? (
+            <button
+              className="badge badgeButton"
+              onClick={() => openSettings('advanced')}
+              title="Manage MCP connectors"
+            >
+              {`connectors: ${status.mcpNames?.length ?? 0}`}
+            </button>
+          ) : null}
+          {mostRecentNeedsInputTask ? (
+            <button
+              className="badge badgeButton badgeWarning"
+              onClick={() => focusTask(mostRecentNeedsInputTask.id)}
+              title="Tasks waiting for your reply"
+            >
+              {`needs input: ${needsInputCount}`}
+            </button>
+          ) : null}
           {planning ? (
             <span className="badge" aria-live="polite">
               <span className="buttonInner">

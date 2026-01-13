@@ -213,7 +213,7 @@ export function SettingsModal({
               <div className="settingsGroup">
                 <div className="settingsRow">
                   <div>
-                    <div className="settingsLabel">Folder to work in</div>
+                    <div className="settingsLabel">Workspace folder</div>
                     <div className="settingsValue">{settings.workspaceDir || 'Not set'}</div>
                   </div>
                   <div className="settingsActions">

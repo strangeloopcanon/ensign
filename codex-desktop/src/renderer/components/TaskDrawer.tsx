@@ -48,6 +48,39 @@ export type Task = {
   items: TaskItem[];
 };
 
+function isAbsolutePath(p: string): boolean {
+  if (p.startsWith('/')) return true;
+  if (p.startsWith('\\')) return true;
+  if (/^[A-Za-z]:[\\/]/.test(p)) return true;
+  return false;
+}
+
+function joinPath(baseDir: string, p: string): string {
+  const base = baseDir.replace(/[\\/]+$/, '');
+  const rel = p.replace(/^[\\/]+/, '');
+  const sep = base.includes('\\') ? '\\' : '/';
+  return `${base}${sep}${rel}`;
+}
+
+function resolveMaybeRelativePath(baseDir: string | null, p: string): string {
+  if (!baseDir) return p;
+  if (isAbsolutePath(p)) return p;
+  return joinPath(baseDir, p);
+}
+
+function fileKindGlyph(kind: 'add' | 'delete' | 'update'): string {
+  switch (kind) {
+    case 'add':
+      return '+';
+    case 'delete':
+      return '−';
+    case 'update':
+      return '•';
+    default:
+      return '•';
+  }
+}
+
 function formatTime(ts: number | null): string {
   if (!ts) return '';
   const d = new Date(ts);
@@ -133,6 +166,31 @@ export function TaskDrawer({
     setResumeError(null);
   }, [selectedTaskId]);
 
+  const selectedTodo = React.useMemo(() => {
+    const items = selected?.items || [];
+    for (let i = items.length - 1; i >= 0; i--) {
+      const it = items[i];
+      if (it.type !== 'todo_list') continue;
+      if (!Array.isArray(it.items) || it.items.length === 0) continue;
+      return it.items;
+    }
+    return null;
+  }, [selected?.items]);
+
+  const selectedFileChanges = React.useMemo(() => {
+    const entries = new Map<string, 'add' | 'delete' | 'update'>();
+    for (const item of selected?.items || []) {
+      if (item.type !== 'file_change') continue;
+      for (const ch of item.changes || []) {
+        if (!ch?.path || !ch?.kind) continue;
+        entries.set(String(ch.path), ch.kind);
+      }
+    }
+    const list = Array.from(entries.entries()).map(([filePath, kind]) => ({ filePath, kind }));
+    list.sort((a, b) => a.filePath.localeCompare(b.filePath));
+    return list;
+  }, [selected?.items]);
+
   const selectedCanResume =
     selected != null &&
     Boolean(selected.threadId) &&
@@ -214,6 +272,50 @@ export function TaskDrawer({
                   <div className="planHint">No activity yet.</div>
                 )}
               </div>
+
+              {selectedTodo ? (
+                <div>
+                  <div className="sectionTitle">Progress</div>
+                  <div className="planHint">
+                    {`${selectedTodo.filter((t) => t.completed).length}/${selectedTodo.length} done`}
+                  </div>
+                  <ul className="todoList">
+                    {selectedTodo.map((t, idx) => (
+                      <li key={idx} className={`todoItem ${t.completed ? 'done' : ''}`}>
+                        <span className="todoMark" aria-hidden="true">
+                          {t.completed ? '✓' : '•'}
+                        </span>
+                        <span className="todoText">{t.text}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              {selectedFileChanges.length ? (
+                <div>
+                  <div className="sectionTitle">Files</div>
+                  <ul className="fileChangeList">
+                    {selectedFileChanges.map((f) => {
+                      const resolved = resolveMaybeRelativePath(selected.cwd, f.filePath);
+                      return (
+                        <li key={`${f.kind}:${f.filePath}`} className={`fileChange ${f.kind}`}>
+                          <span className="fileKind" aria-hidden="true">
+                            {fileKindGlyph(f.kind)}
+                          </span>
+                          <button
+                            className="linkButton filePathButton"
+                            onClick={() => void window.codex.openPath(resolved)}
+                            title={resolved}
+                          >
+                            {f.filePath}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ) : null}
 
               {selected.plan ? (
                 <div>
