@@ -340,6 +340,9 @@ function App() {
 
       const sourceTextForTask = sourceText;
       let effectivePrompt = userPrompt;
+      const approvedPermissionIds = Object.entries(permissionGrants)
+        .filter(([, granted]) => granted)
+        .map(([id]) => id);
 
       const selectedSkillIds = (settings.selectedSkills || []).filter(Boolean);
       if (selectedSkillIds.length) {
@@ -391,6 +394,7 @@ function App() {
         sandboxMode: settings.sandboxMode,
         model: settings.modelOverride,
         plan,
+        approvedPermissionIds,
         includePlanTool: settings.experimentalPlanTool,
         enableSearch: settings.experimentalSearch,
         configOverrides: settings.experimentalConfigOverrides,

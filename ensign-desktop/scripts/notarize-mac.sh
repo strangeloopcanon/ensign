@@ -49,7 +49,8 @@ SUBMIT_EXIT=$?
 set -e
 
 if [[ $SUBMIT_EXIT -ne 0 ]]; then
-  if echo "$SUBMIT_OUTPUT" | grep -q "No Keychain password item found for profile"; then
+  # notarytool error strings vary slightly across Xcode versions/locales; match the key intent.
+  if echo "$SUBMIT_OUTPUT" | grep -Eiq "keychain.*profile.*(not found|missing)|no keychain.*profile|no keychain password item found for profile"; then
     echo "notarize: skipped (Keychain profile '${PROFILE}' not found)" >&2
     echo "notarize: one-time setup:" >&2
     echo "  xcrun notarytool store-credentials \"${PROFILE}\" --apple-id \"<APPLE_ID>\" --team-id \"<TEAM_ID>\" --sync" >&2

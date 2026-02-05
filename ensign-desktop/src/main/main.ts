@@ -285,12 +285,39 @@ ipcMain.handle('codex:taskList', async () => {
   return { ok: true, tasks: tasks.listTasks() };
 });
 
+function getRequiredPermissionIds(plan: unknown): string[] {
+  if (!plan || typeof plan !== 'object') return [];
+  const permissions = (plan as { permissions?: unknown }).permissions;
+  if (!Array.isArray(permissions)) return [];
+  const required: string[] = [];
+  for (const permission of permissions) {
+    if (!permission || typeof permission !== 'object') continue;
+    const id = (permission as { id?: unknown }).id;
+    const mustApprove = (permission as { required?: unknown }).required === true;
+    if (!mustApprove) continue;
+    if (typeof id !== 'string' || !id.trim()) continue;
+    required.push(id);
+  }
+  return required;
+}
+
 ipcMain.handle('codex:taskEnqueue', async (_event, payload: EnqueueTaskPayload) => {
   try {
     if (!payload || typeof payload !== 'object') return { ok: false, error: 'Missing payload' };
     if (typeof payload.userPrompt !== 'string' || !payload.userPrompt.trim()) return { ok: false, error: 'Missing prompt' };
     if (typeof payload.effectivePrompt !== 'string' || !payload.effectivePrompt.trim())
       return { ok: false, error: 'Missing effective prompt' };
+    const approvedPermissionIds = Array.isArray((payload as any).approvedPermissionIds)
+      ? (payload as any).approvedPermissionIds.filter((id: unknown): id is string => typeof id === 'string' && !!id.trim())
+      : [];
+    const requiredPermissionIds = getRequiredPermissionIds((payload as any).plan);
+    if (requiredPermissionIds.length > 0) {
+      const approved = new Set(approvedPermissionIds);
+      const missing = requiredPermissionIds.filter((id) => !approved.has(id));
+      if (missing.length > 0) {
+        return { ok: false, error: `Missing required permission approvals: ${missing.join(', ')}` };
+      }
+    }
 
     const saved = readSettings();
     const sandboxMode = isSandboxMode((payload as any).sandboxMode) ? (payload as any).sandboxMode : saved.sandboxMode;

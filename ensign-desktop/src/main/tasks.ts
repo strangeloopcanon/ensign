@@ -68,6 +68,7 @@ export type EnqueueTaskPayload = {
   sandboxMode: SandboxMode;
   model?: string | null;
   plan?: Plan | null;
+  approvedPermissionIds?: string[];
   includePlanTool?: boolean;
   enableSearch?: boolean;
   configOverrides?: string[];
@@ -316,6 +317,8 @@ export class TaskManager {
 
     const stubMode = process.env.ENSIGN_DESKTOP_FORCE_STUB === '1';
     if (stubMode) {
+      const rawDelay = Number(process.env.ENSIGN_DESKTOP_STUB_DELAY_MS || '50');
+      const stubDelayMs = Number.isFinite(rawDelay) ? Math.max(0, Math.floor(rawDelay)) : 50;
       rt.stubTimer = setTimeout(() => {
         if (rt.canceled) return;
         const cwd = task.cwd ?? process.cwd();
@@ -323,7 +326,7 @@ export class TaskManager {
         task.outputText += text;
         broadcast('codex:taskEvent', { type: 'task.outputDelta', taskId, delta: text });
         this.finish(taskId, task, rt, null);
-      }, 50);
+      }, stubDelayMs);
       return;
     }
 
