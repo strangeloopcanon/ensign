@@ -3,14 +3,14 @@ import { createRoot } from 'react-dom/client';
 import { CommandBar } from './components/CommandBar';
 import { Canvas } from './components/Canvas';
 import { DiffView } from './components/DiffView';
-import type { Plan } from './components/PlanDrawer';
 import { PlanReviewModal } from './components/PlanReviewModal';
 import { ActionBar } from './components/ActionBar';
 import { HomeTemplates } from './components/HomeTemplates';
-import { TaskDrawer, type Task, type TaskStatus } from './components/TaskDrawer';
+import { TaskDrawer } from './components/TaskDrawer';
 import { SettingsModal, type Settings, type SettingsTab } from './components/SettingsModal';
 import { SaveAsModal } from './components/SaveAsModal';
 import { ToastHost, type Toast, type ToastKind } from './components/ToastHost';
+import type { Plan, TaskStatus, TaskSummary as Task } from '../main/task_types';
 
 type DroppedFile = { name: string; path?: string };
 
@@ -164,6 +164,7 @@ function App() {
       const first = paths[0];
       const r = await window.codex.readFileText(first);
       if (r.ok && r.text) setSourceText(r.text);
+      else if (!r.ok && r.error) pushToast(`Preview skipped: ${r.error}`, 'info', { ttlMs: 6000 });
     });
     const unsubTask = window.codex?.onTaskEvent?.((ev: any) => {
       if (!ev || typeof ev !== 'object') return;
@@ -224,7 +225,7 @@ function App() {
       try { unsubFiles && unsubFiles(); } catch {}
       try { unsubTask && unsubTask(); } catch {}
     };
-  }, [refreshStatus]);
+  }, [pushToast, refreshStatus]);
 
   useEffect(() => {
     const nextStatuses: Record<string, TaskStatus> = {};
@@ -293,6 +294,7 @@ function App() {
     if (firstPath) {
       window.codex.readFileText(firstPath).then((res) => {
         if (res.ok && res.text) setSourceText(res.text);
+        else if (!res.ok && res.error) pushToast(`Preview skipped: ${res.error}`, 'info', { ttlMs: 6000 });
       }).catch((err) => console.error('Failed to read dropped file', err));
     }
   };
@@ -300,21 +302,28 @@ function App() {
   const runPlan = async () => {
     if (!prompt.trim()) return;
     setPlanning(true);
-    const files = dropped.map((f) => ({ name: f.name }));
-    const r = await window.codex.plan({
-      prompt,
-      files,
-      cwd: settings.workspaceDir || undefined,
-      sandboxMode: settings.sandboxMode,
-      modelOverride: settings.modelOverride,
-    });
-    setPlanning(false);
-    if (r.ok && r.plan) setPlan(r.plan);
-    if (r.ok && r.plan) {
+    try {
+      const files = dropped.map((f) => ({ name: f.name }));
+      const r = await window.codex.plan({
+        prompt,
+        files,
+        cwd: settings.workspaceDir || undefined,
+        sandboxMode: settings.sandboxMode,
+        modelOverride: settings.modelOverride,
+      });
+      if (!r.ok || !r.plan) {
+        pushToast(`Failed to generate plan: ${r.error || 'unknown error'}`, 'error');
+        return;
+      }
+      setPlan(r.plan);
       const next: Record<string, boolean> = {};
       for (const perm of r.plan.permissions) next[perm.id] = false;
       setPermissionGrants(next);
       setPlanReviewOpen(true);
+    } catch (err: any) {
+      pushToast(`Failed to generate plan: ${err?.message || String(err)}`, 'error');
+    } finally {
+      setPlanning(false);
     }
   };
 

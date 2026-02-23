@@ -40,6 +40,10 @@ test.describe('Diff preview', () => {
       });
       page = await app.firstWindow();
 
+      await page.evaluate(async (workspaceDir) => {
+        await window.codex.updateSettings({ workspaceDir });
+      }, path.dirname(tmp));
+
       await page.getByLabel('Command').fill('Improve this text');
       await page.evaluate((filePath) => window.codex.debugEmitFiles?.([filePath]), tmp);
 

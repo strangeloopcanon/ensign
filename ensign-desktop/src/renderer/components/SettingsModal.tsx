@@ -169,6 +169,16 @@ export function SettingsModal({
     (mcpAddTransport === 'stdio' ? mcpAddCommand.trim().length > 0 : mcpAddUrl.trim().length > 0);
 
   const additionalWritableRoots = Array.isArray(settings.additionalWritableRoots) ? settings.additionalWritableRoots : [];
+  const toggleSkill = React.useCallback(
+    async (skillId: string, checked: boolean) => {
+      await runWithBusy(async () => {
+        const current = settings.selectedSkills || [];
+        const next = checked ? Array.from(new Set([...current, skillId])) : current.filter((id) => id !== skillId);
+        await onSaveSettings({ selectedSkills: next });
+      });
+    },
+    [onSaveSettings, runWithBusy, settings.selectedSkills]
+  );
 
   return (
     <div className="modalOverlay" role="dialog" aria-label="Settings" onMouseDown={onClose}>
@@ -580,9 +590,7 @@ export function SettingsModal({
                                 checked={checked}
                                 disabled={busy}
                                 onChange={(e) => {
-                                  const current = settings.selectedSkills || [];
-                                  const next = e.target.checked ? Array.from(new Set([...current, s.id])) : current.filter((id) => id !== s.id);
-                                  void onSaveSettings({ selectedSkills: next });
+                                  void toggleSkill(s.id, e.target.checked);
                                 }}
                               />
                               <span>{s.name || s.id}</span>
