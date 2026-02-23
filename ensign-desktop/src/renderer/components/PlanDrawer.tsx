@@ -1,12 +1,8 @@
 import React from 'react';
+import type { Plan as SharedPlan, PlanPermission as SharedPermission } from '../../main/task_types';
 
-export type Permission = { id: string; label: string; required: boolean };
-
-export type Plan = {
-  steps: { id: string; text: string }[];
-  permissions: Permission[];
-  sources: string[];
-};
+export type Permission = SharedPermission;
+export type Plan = SharedPlan;
 
 type Props = {
   plan?: Plan | null;

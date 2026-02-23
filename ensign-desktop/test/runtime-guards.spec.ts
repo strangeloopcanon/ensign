@@ -164,16 +164,33 @@ test.describe('Runtime guards', () => {
       const second = await enqueue('second');
       const third = await enqueue('third');
 
-      const taskList = await window.codex.taskList();
-      const tasks = taskList.ok && Array.isArray(taskList.tasks) ? taskList.tasks : [];
-      const runningCount = tasks.filter((task: any) => task.status === 'running').length;
-      const queuedCount = tasks.filter((task: any) => task.status === 'queued').length;
+      const queueSnapshot = await (async () => {
+        const deadline = Date.now() + 1500;
+        let runningCount = 0;
+        let queuedCount = 0;
+        while (Date.now() < deadline) {
+          const taskList = await window.codex.taskList();
+          const tasks = taskList.ok && Array.isArray(taskList.tasks) ? taskList.tasks : [];
+          runningCount = tasks.filter((task: any) => task.status === 'running').length;
+          queuedCount = tasks.filter((task: any) => task.status === 'queued').length;
+          if (runningCount >= 1 && queuedCount >= 1) break;
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        return { runningCount, queuedCount };
+      })();
 
       const resumeError = first.taskId
         ? await window.codex.taskResume({ taskId: first.taskId, prompt: 'continue' })
         : { ok: false, error: 'missing task id' };
 
-      return { first, second, third, runningCount, queuedCount, resumeError };
+      return {
+        first,
+        second,
+        third,
+        runningCount: queueSnapshot.runningCount,
+        queuedCount: queueSnapshot.queuedCount,
+        resumeError,
+      };
     });
 
     expect(result.first.ok).toBeTruthy();

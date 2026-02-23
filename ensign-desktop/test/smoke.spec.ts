@@ -22,7 +22,6 @@ test('electron boots in prod and opens a window', async () => {
     env: {
       ...process.env,
       NODE_ENV: 'production',
-      ENSIGN_DESKTOP_FORCE_STUB: '1',
       ENSIGN_DESKTOP_USER_DATA: userDataDir,
     },
   });

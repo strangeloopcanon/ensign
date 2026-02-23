@@ -10,7 +10,8 @@
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,
-    "noEmitOnError": false
+    "noEmitOnError": true,
+    "forceConsistentCasingInFileNames": true
   },
   "include": ["src/main/**/*"],
   "exclude": ["node_modules", "build"]

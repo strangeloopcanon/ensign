@@ -15,8 +15,7 @@ import { resolveBundledCodexPath } from './codex_bin';
 
 const isDev = process.env.NODE_ENV !== 'production' && !app.isPackaged;
 let cachedEnvPath: string | null = null;
-const originalCodexHome = process.env.CODEX_HOME;
-const tasks = new TaskManager();
+let globalCodexHomeFromEnv: string | null = null;
 
 function isStubMode(): boolean {
   return process.env.ENSIGN_DESKTOP_FORCE_STUB === '1';
@@ -64,6 +63,33 @@ function loadEnv() {
   if (fs.existsSync(envPath)) dotenv.config({ path: envPath });
 }
 
+function normalizeOptionalString(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+function refreshGlobalCodexHomeFromEnv() {
+  globalCodexHomeFromEnv = normalizeOptionalString(process.env.CODEX_HOME);
+}
+
+function broadcast(channel: string, payload: unknown) {
+  for (const win of BrowserWindow.getAllWindows()) {
+    try {
+      win.webContents.send(channel, payload);
+    } catch {
+      // ignore
+    }
+  }
+}
+
+function broadcastTaskEvent(payload: unknown) {
+  broadcast('codex:taskEvent', payload);
+}
+
+const tasks = new TaskManager(broadcastTaskEvent);
+refreshGlobalCodexHomeFromEnv();
+
 function getApiKeyPresent(): boolean {
   return !!(process.env.OPENAI_API_KEY || process.env.CODEX_API_KEY);
 }
@@ -73,7 +99,7 @@ function getAppCodexHomeDir(): string {
 }
 
 function getGlobalCodexConfigPath(): string {
-  const dir = originalCodexHome || path.join(os.homedir(), '.codex');
+  const dir = globalCodexHomeFromEnv || path.join(os.homedir(), '.codex');
   return path.join(dir, 'config.toml');
 }
 
@@ -92,9 +118,133 @@ function applyCodexHomeFromSettings(settings: AppSettings) {
     const model = settings.modelOverride || 'gpt-5.2';
     ensureCodexConfigAt(path.join(home, 'config.toml'), model);
   } else {
-    if (originalCodexHome) process.env.CODEX_HOME = originalCodexHome;
+    if (globalCodexHomeFromEnv) process.env.CODEX_HOME = globalCodexHomeFromEnv;
     else delete process.env.CODEX_HOME;
   }
+}
+
+type CwdResolution = {
+  cwd: string | null;
+  error: string | null;
+};
+
+type ResolvedExecutionSettings = {
+  cwd: string | null;
+  sandboxMode: SandboxMode;
+  model: string | null;
+  includePlanTool: boolean;
+  enableSearch: boolean;
+  configOverrides: string[];
+  allowOutsideWorkspaceRead: boolean;
+  additionalWritableRoots: string[];
+  allowAdditionalWrites: boolean;
+};
+
+function resolveCwd(rawCwd: unknown): CwdResolution {
+  const input = normalizeOptionalString(rawCwd);
+  if (!input) return { cwd: null, error: null };
+  try {
+    const resolved = path.resolve(input);
+    const stats = fs.statSync(resolved);
+    if (!stats.isDirectory()) {
+      return { cwd: null, error: `Working directory is not a folder: ${resolved}` };
+    }
+    return { cwd: resolved, error: null };
+  } catch (err: any) {
+    return { cwd: null, error: `Invalid working directory: ${err?.message || input}` };
+  }
+}
+
+function normalizeStringArray(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((value) => (typeof value === 'string' ? value.trim() : ''))
+    .filter(Boolean);
+}
+
+function resolveExecutionSettings(
+  saved: AppSettings,
+  opts: {
+    cwd?: unknown;
+    sandboxMode?: unknown;
+    model?: unknown;
+    includePlanTool?: unknown;
+    enableSearch?: unknown;
+    configOverrides?: unknown;
+  }
+): { settings?: ResolvedExecutionSettings; error?: string } {
+  const cwdResult = resolveCwd(opts.cwd);
+  if (cwdResult.error) return { error: cwdResult.error };
+  const cwd = cwdResult.cwd;
+
+  const sandboxMode = isSandboxMode(opts.sandboxMode) ? opts.sandboxMode : saved.sandboxMode;
+  const modelOverride = normalizeOptionalString(opts.model);
+  const defaultModel = normalizeOptionalString(saved.modelOverride);
+  const model = modelOverride ?? defaultModel;
+  const includePlanTool = typeof opts.includePlanTool === 'boolean' ? opts.includePlanTool : saved.experimentalPlanTool;
+  const enableSearch = typeof opts.enableSearch === 'boolean' ? opts.enableSearch : saved.experimentalSearch;
+  const baseOverrides = normalizeStringArray(
+    Array.isArray(opts.configOverrides) ? opts.configOverrides : saved.experimentalConfigOverrides
+  );
+  const configOverrides = [...baseOverrides];
+
+  const allowOutsideWorkspaceRead = !!saved.allowOutsideWorkspaceRead && sandboxMode !== 'danger-full-access';
+  if (allowOutsideWorkspaceRead) {
+    const alreadyOverridesSandboxPermissions = configOverrides.some((o) => o.includes('sandbox_permissions'));
+    if (!alreadyOverridesSandboxPermissions) {
+      configOverrides.unshift('sandbox_permissions=["disk-full-read-access"]');
+    }
+  }
+
+  const additionalWritableRoots = cwd ? saved.additionalWritableRoots.filter((p) => p !== cwd) : saved.additionalWritableRoots;
+  const allowAdditionalWrites = sandboxMode === 'workspace-write' && additionalWritableRoots.length > 0;
+  if (allowAdditionalWrites) {
+    const alreadyOverridesWritableRoots = configOverrides.some((o) => o.includes('sandbox_workspace_write.writable_roots'));
+    if (!alreadyOverridesWritableRoots) {
+      configOverrides.unshift(`sandbox_workspace_write.writable_roots=${JSON.stringify(additionalWritableRoots)}`);
+    }
+  }
+
+  return {
+    settings: {
+      cwd,
+      sandboxMode,
+      model,
+      includePlanTool,
+      enableSearch,
+      configOverrides,
+      allowOutsideWorkspaceRead,
+      additionalWritableRoots,
+      allowAdditionalWrites,
+    },
+  };
+}
+
+function safeRealPath(inputPath: string): string {
+  try {
+    return fs.realpathSync.native(inputPath);
+  } catch {
+    return path.resolve(inputPath);
+  }
+}
+
+function isWithinRoot(targetPath: string, rootPath: string): boolean {
+  const relative = path.relative(rootPath, targetPath);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function canReadTextFile(settings: AppSettings, filePath: string): boolean {
+  if (settings.allowOutsideWorkspaceRead) return true;
+  const roots = [
+    ...(settings.workspaceDir ? [settings.workspaceDir] : []),
+    ...settings.additionalWritableRoots,
+    ...(settings.outputDir ? [settings.outputDir] : []),
+  ]
+    .map((p) => normalizeOptionalString(p))
+    .filter((p): p is string => !!p);
+  if (!roots.length) return false;
+  const resolvedTarget = safeRealPath(filePath);
+  return roots.some((root) => isWithinRoot(resolvedTarget, safeRealPath(root)));
 }
 
 type BundledCodexResult = {
@@ -204,6 +354,7 @@ if (!gotLock) {
 
   app.whenReady().then(() => {
     loadEnv();
+    refreshGlobalCodexHomeFromEnv();
     const initial = readSettings();
     applyCodexHomeFromSettings(initial);
     tasks.setConcurrency(initial.taskConcurrency);
@@ -240,22 +391,11 @@ app.on('window-all-closed', () => {
 
 // IPC
 ipcMain.handle('codex:run', async (event, { prompt, cwd, sandboxMode, modelOverride }) => {
-  if (cwd) {
-    try {
-      const resolved = path.resolve(cwd);
-      const stats = fs.statSync(resolved);
-      if (!stats.isDirectory()) {
-        return { ok: false, error: `cwd is not a directory: ${resolved}` };
-      }
-      cwd = resolved;
-    } catch (err: any) {
-      return { ok: false, error: `Invalid working directory: ${err?.message || cwd}` };
-    }
-  }
+  const cwdResult = resolveCwd(cwd);
+  if (cwdResult.error) return { ok: false, error: cwdResult.error };
+  const resolvedCwd = cwdResult.cwd ?? undefined;
   const { sender } = event;
-  let aggregate = '';
   const append = (chunk: string) => {
-    aggregate += chunk;
     try {
       sender.send('codex:stream', chunk);
     } catch (error) {
@@ -272,7 +412,7 @@ ipcMain.handle('codex:run', async (event, { prompt, cwd, sandboxMode, modelOverr
       effectiveModelOverride = saved.modelOverride;
     }
     const result = await runTask(
-      { prompt, cwd, sandboxMode: effectiveSandboxMode, modelOverride: effectiveModelOverride },
+      { prompt, cwd: resolvedCwd, sandboxMode: effectiveSandboxMode, modelOverride: effectiveModelOverride },
       append
     );
     return { ok: true, text: result };
@@ -320,65 +460,27 @@ ipcMain.handle('codex:taskEnqueue', async (_event, payload: EnqueueTaskPayload) 
     }
 
     const saved = readSettings();
-    const sandboxMode = isSandboxMode((payload as any).sandboxMode) ? (payload as any).sandboxMode : saved.sandboxMode;
-
-    let cwd = typeof payload.cwd === 'string' && payload.cwd.trim() ? payload.cwd.trim() : null;
-    if (cwd) {
-      try {
-        const resolved = path.resolve(cwd);
-        const stats = fs.statSync(resolved);
-        if (!stats.isDirectory()) cwd = null;
-        else cwd = resolved;
-      } catch {
-        cwd = null;
-      }
+    const resolved = resolveExecutionSettings(saved, {
+      cwd: payload.cwd,
+      sandboxMode: (payload as any).sandboxMode,
+      model: (payload as any).model,
+      includePlanTool: (payload as any).includePlanTool,
+      enableSearch: (payload as any).enableSearch,
+      configOverrides: (payload as any).configOverrides,
+    });
+    if (resolved.error || !resolved.settings) {
+      return { ok: false, error: resolved.error || 'Invalid task settings' };
     }
-
-    let model: string | null = null;
-    if (typeof (payload as any).model === 'string') {
-      model = (payload as any).model as string;
-    } else if (typeof saved.modelOverride === 'string') {
-      model = saved.modelOverride;
-    }
-
-    const includePlanTool =
-      typeof (payload as any).includePlanTool === 'boolean' ? (payload as any).includePlanTool : saved.experimentalPlanTool;
-    const enableSearch =
-      typeof (payload as any).enableSearch === 'boolean' ? (payload as any).enableSearch : saved.experimentalSearch;
-    const baseOverrides = Array.isArray((payload as any).configOverrides)
-      ? (payload as any).configOverrides.filter((v: unknown) => typeof v === 'string')
-      : saved.experimentalConfigOverrides;
-    const configOverrides = Array.isArray(baseOverrides) ? [...baseOverrides] : [];
-
-    if (saved.allowOutsideWorkspaceRead && sandboxMode !== 'danger-full-access') {
-      const alreadyOverridesSandboxPermissions = configOverrides.some(
-        (o) => typeof o === 'string' && o.includes('sandbox_permissions')
-      );
-      if (!alreadyOverridesSandboxPermissions) {
-        configOverrides.unshift('sandbox_permissions=["disk-full-read-access"]');
-      }
-    }
-
-    if (sandboxMode === 'workspace-write' && saved.additionalWritableRoots.length > 0) {
-      const alreadyOverridesWritableRoots = configOverrides.some(
-        (o) => typeof o === 'string' && o.includes('sandbox_workspace_write.writable_roots')
-      );
-      if (!alreadyOverridesWritableRoots) {
-        const roots = cwd ? saved.additionalWritableRoots.filter((p) => p !== cwd) : saved.additionalWritableRoots;
-        if (roots.length > 0) {
-          configOverrides.unshift(`sandbox_workspace_write.writable_roots=${JSON.stringify(roots)}`);
-        }
-      }
-    }
+    const execution = resolved.settings;
 
     const task = tasks.enqueue({
       ...payload,
-      cwd,
-      sandboxMode,
-      model,
-      includePlanTool,
-      enableSearch,
-      configOverrides,
+      cwd: execution.cwd,
+      sandboxMode: execution.sandboxMode,
+      model: execution.model,
+      includePlanTool: execution.includePlanTool,
+      enableSearch: execution.enableSearch,
+      configOverrides: execution.configOverrides,
     });
     return { ok: true, taskId: task.id, task };
   } catch (e: any) {
@@ -401,17 +503,9 @@ ipcMain.handle('codex:taskResume', async (_event, payload: { taskId: string; pro
 
 ipcMain.handle('codex:listSkills', async (_event, payload?: { cwd?: string | null }) => {
   try {
-    let cwd = typeof payload?.cwd === 'string' && payload.cwd.trim() ? payload.cwd.trim() : null;
-    if (cwd) {
-      try {
-        const resolved = path.resolve(cwd);
-        const stats = fs.statSync(resolved);
-        if (!stats.isDirectory()) cwd = null;
-        else cwd = resolved;
-      } catch {
-        cwd = null;
-      }
-    }
+    const resolvedPayloadCwd = resolveCwd(payload?.cwd);
+    if (resolvedPayloadCwd.error) return { ok: false, error: resolvedPayloadCwd.error };
+    let cwd = resolvedPayloadCwd.cwd;
     if (!cwd) cwd = readSettings().workspaceDir;
     if (!cwd) return { ok: true, skills: [] };
     return { ok: true, skills: listWorkspaceSkills(cwd) };
@@ -680,102 +774,103 @@ ipcMain.handle(
       selectedSkills?: string[];
     }
   ) => {
-  const files = payload?.files || [];
-  const stubMode = isStubMode();
-  const apiKeyPresent = getApiKeyPresent();
-  const saved = readSettings();
-  let cwd = payload?.cwd;
-  if (cwd) {
-    try {
-      const resolved = path.resolve(cwd);
-      const stats = fs.statSync(resolved);
-      if (!stats.isDirectory()) cwd = undefined;
-      else cwd = resolved;
-    } catch {
-      cwd = undefined;
+    const files = payload?.files || [];
+    const stubMode = isStubMode();
+    const apiKeyPresent = getApiKeyPresent();
+    const saved = readSettings();
+    const resolved = resolveExecutionSettings(saved, {
+      cwd: payload?.cwd,
+      sandboxMode: payload?.sandboxMode,
+      model: payload?.modelOverride,
+      includePlanTool: payload?.includePlanTool,
+      enableSearch: payload?.enableSearch,
+    });
+    if (resolved.error || !resolved.settings) {
+      return { ok: false, error: resolved.error || 'Invalid plan settings' };
     }
-  }
-  const sandboxMode = isSandboxMode(payload?.sandboxMode) ? payload.sandboxMode : saved.sandboxMode;
-  const modelOverride =
-    typeof payload?.modelOverride === 'string' ? payload.modelOverride.trim() : saved.modelOverride?.trim() || null;
-  const enableSearch = typeof payload?.enableSearch === 'boolean' ? payload.enableSearch : saved.experimentalSearch;
-  const includePlanTool =
-    typeof payload?.includePlanTool === 'boolean' ? payload.includePlanTool : saved.experimentalPlanTool;
-  const selectedSkills = Array.isArray(payload?.selectedSkills) ? payload.selectedSkills : saved.selectedSkills;
+    const execution = resolved.settings;
+    const cwd = execution.cwd ?? undefined;
+    const sandboxMode = execution.sandboxMode;
+    const modelOverride = execution.model;
+    const enableSearch = execution.enableSearch;
+    const includePlanTool = execution.includePlanTool;
+    const selectedSkills = Array.isArray(payload?.selectedSkills) ? payload.selectedSkills : saved.selectedSkills;
+    const allowOutsideWorkspaceRead = execution.allowOutsideWorkspaceRead;
+    const additionalWritableRoots = execution.additionalWritableRoots;
+    const allowAdditionalWrites = execution.allowAdditionalWrites;
 
-  const allowOutsideWorkspaceRead = !!saved.allowOutsideWorkspaceRead && sandboxMode !== 'danger-full-access';
-  const additionalWritableRoots = cwd ? saved.additionalWritableRoots.filter((p) => p !== cwd) : saved.additionalWritableRoots;
-  const allowAdditionalWrites = sandboxMode === 'workspace-write' && additionalWritableRoots.length > 0;
+    let additionalWriteSummary: string | null = null;
+    if (allowAdditionalWrites) {
+      const shown = additionalWritableRoots.slice(0, 2).join(', ');
+      additionalWriteSummary =
+        additionalWritableRoots.length > 2 ? `${shown}, … (+${additionalWritableRoots.length - 2})` : shown;
+    }
 
-  let additionalWriteSummary: string | null = null;
-  if (allowAdditionalWrites) {
-    const shown = additionalWritableRoots.slice(0, 2).join(', ');
-    additionalWriteSummary =
-      additionalWritableRoots.length > 2 ? `${shown}, … (+${additionalWritableRoots.length - 2})` : shown;
-  }
+    const steps: { id: string; text: string }[] = [];
+    steps.push({ id: 'parse', text: 'Parse inputs and understand intent' });
 
-  const steps: { id: string; text: string }[] = [];
-  steps.push({ id: 'parse', text: 'Parse inputs and understand intent' });
+    if (cwd) steps.push({ id: 'cwd', text: `Work in folder: ${cwd}` });
+    if (allowAdditionalWrites) {
+      let text = 'May write in additional folder(s)';
+      if (additionalWriteSummary) text = `May write in additional folder(s): ${additionalWriteSummary}`;
+      steps.push({ id: 'extra-write', text });
+    }
+    if (allowOutsideWorkspaceRead) {
+      steps.push({ id: 'outside-read', text: 'May read files outside the selected folder (full disk read)' });
+    }
+    if (selectedSkills?.length) steps.push({ id: 'skills', text: `Use ${selectedSkills.length} skill(s)` });
+    if (files.length > 0) steps.push({ id: 'read', text: `Read ${files.length} file(s)` });
+    else steps.push({ id: 'noop', text: 'No external files' });
+    if (!stubMode && !apiKeyPresent) steps.push({ id: 'key', text: 'Configure API key in Settings' });
+    if (enableSearch) steps.push({ id: 'search', text: 'Enable web search' });
+    if (includePlanTool) steps.push({ id: 'plan-tool', text: 'Enable plan tool (todos)' });
+    steps.push({ id: 'gen', text: 'Generate artifact' });
+    if (sandboxMode === 'danger-full-access') {
+      steps.push({ id: 'full-disk', text: 'May access files outside the selected folder' });
+    }
+    if (sandboxMode !== 'read-only') steps.push({ id: 'writes', text: `Potentially write files (${sandboxMode})` });
+    if (modelOverride) steps.push({ id: 'model', text: `Use model override: ${modelOverride}` });
+    const promptText = (payload?.prompt || '').toLowerCase();
+    const needsEmail = /\b(email|mail|inbox|reply|gmail)\b/.test(promptText);
+    const needsCalendar = /\b(calendar|schedule|event|meeting)\b/.test(promptText);
+    const status = readStatus();
+    const mcpPermissions = (status.mcpNames || []).map((name) => {
+      const key = name.toLowerCase();
+      let required = false;
+      if (needsEmail && /(mail|gmail|email)/.test(key)) required = true;
+      if (needsCalendar && /(cal|calendar)/.test(key)) required = true;
+      const id = `mcp-${key.replace(/[^a-z0-9]+/g, '-')}`;
+      return {
+        id,
+        label: `Use MCP server "${name}"`,
+        required,
+      };
+    });
+    const permissions = [
+      ...(files.length ? [{ id: 'read-files', label: `Read ${files.length} file(s)`, required: true }] : []),
+      ...(!stubMode ? [{ id: 'network', label: 'Network access (model call)', required: true }] : []),
+      ...(allowOutsideWorkspaceRead
+        ? [{ id: 'full-disk-read', label: 'Read files outside the selected folder (full disk read)', required: true }]
+        : []),
+      ...(allowAdditionalWrites
+        ? [{ id: 'extra-write', label: 'Write in additional folder(s) outside the workspace', required: true }]
+        : []),
+      ...(sandboxMode === 'danger-full-access'
+        ? [{ id: 'full-disk', label: 'Access files outside the selected folder (full disk)', required: true }]
+        : []),
+      ...(sandboxMode !== 'read-only'
+        ? [{ id: 'write-workspace', label: `Write files (${sandboxMode})`, required: true }]
+        : []),
+      ...mcpPermissions,
+    ];
 
-  if (cwd) steps.push({ id: 'cwd', text: `Work in folder: ${cwd}` });
-  if (allowAdditionalWrites) {
-    let text = 'May write in additional folder(s)';
-    if (additionalWriteSummary) text = `May write in additional folder(s): ${additionalWriteSummary}`;
-    steps.push({ id: 'extra-write', text });
+    const sources: string[] = [];
+    if (cwd) sources.push(cwd);
+    if (allowAdditionalWrites) sources.push(...additionalWritableRoots);
+    sources.push(...files.map((f) => f.name));
+    return { ok: true, plan: { steps, permissions, sources } };
   }
-  if (allowOutsideWorkspaceRead) {
-    steps.push({ id: 'outside-read', text: 'May read files outside the selected folder (full disk read)' });
-  }
-  if (selectedSkills?.length) steps.push({ id: 'skills', text: `Use ${selectedSkills.length} skill(s)` });
-  if (files.length > 0) steps.push({ id: 'read', text: `Read ${files.length} file(s)` });
-  else steps.push({ id: 'noop', text: 'No external files' });
-  if (!stubMode && !apiKeyPresent) steps.push({ id: 'key', text: 'Configure API key in Settings' });
-  if (enableSearch) steps.push({ id: 'search', text: 'Enable web search' });
-  if (includePlanTool) steps.push({ id: 'plan-tool', text: 'Enable plan tool (todos)' });
-  steps.push({ id: 'gen', text: 'Generate artifact' });
-  if (sandboxMode === 'danger-full-access') {
-    steps.push({ id: 'full-disk', text: 'May access files outside the selected folder' });
-  }
-  if (sandboxMode !== 'read-only') steps.push({ id: 'writes', text: `Potentially write files (${sandboxMode})` });
-  if (modelOverride) steps.push({ id: 'model', text: `Use model override: ${modelOverride}` });
-  const promptText = (payload?.prompt || '').toLowerCase();
-  const needsEmail = /\b(email|mail|inbox|reply|gmail)\b/.test(promptText);
-  const needsCalendar = /\b(calendar|schedule|event|meeting)\b/.test(promptText);
-  const status = readStatus();
-  const mcpPermissions = (status.mcpNames || []).map((name) => {
-    const key = name.toLowerCase();
-    let required = false;
-    if (needsEmail && /(mail|gmail|email)/.test(key)) required = true;
-    if (needsCalendar && /(cal|calendar)/.test(key)) required = true;
-    const id = `mcp-${key.replace(/[^a-z0-9]+/g, '-')}`;
-    return {
-      id,
-      label: `Use MCP server "${name}"`,
-      required,
-    };
-  });
-  const permissions = [
-    ...(files.length ? [{ id: 'read-files', label: `Read ${files.length} file(s)`, required: true }] : []),
-    ...(!stubMode ? [{ id: 'network', label: 'Network access (model call)', required: true }] : []),
-    ...(allowOutsideWorkspaceRead
-      ? [{ id: 'full-disk-read', label: 'Read files outside the selected folder (full disk read)', required: true }]
-      : []),
-    ...(allowAdditionalWrites
-      ? [{ id: 'extra-write', label: 'Write in additional folder(s) outside the workspace', required: true }]
-      : []),
-    ...(sandboxMode === 'danger-full-access'
-      ? [{ id: 'full-disk', label: 'Access files outside the selected folder (full disk)', required: true }]
-      : []),
-    ...(sandboxMode !== 'read-only' ? [{ id: 'write-workspace', label: `Write files (${sandboxMode})`, required: true }] : []),
-    ...mcpPermissions,
-  ];
-
-  const sources: string[] = [];
-  if (cwd) sources.push(cwd);
-  if (allowAdditionalWrites) sources.push(...additionalWritableRoots);
-  sources.push(...files.map((f) => f.name));
-  return { ok: true, plan: { steps, permissions, sources } };
-});
+);
 
 // Save artifact deterministically with versioning
 ipcMain.handle('codex:saveArtifact', async (_e, payload: { name: string; kind: 'text'; content: string }) => {
@@ -820,12 +915,24 @@ ipcMain.handle('codex:openPath', async (_e, p: string) => {
 // Simple text read for diff previews
 ipcMain.handle('codex:readFileText', async (_e, filePath: string) => {
   try {
-    const stat = fs.statSync(filePath);
+    if (!filePath || typeof filePath !== 'string') return { ok: false, error: 'Missing file path' };
+    const resolved = path.resolve(filePath);
+    const stat = fs.statSync(resolved);
     if (!stat.isFile()) return { ok: false, error: 'Not a file' };
     // guard: avoid huge files
     const max = 5 * 1024 * 1024;
     if (stat.size > max) return { ok: false, error: 'File too large' };
-    const text = fs.readFileSync(filePath, 'utf8');
+
+    const settings = readSettings();
+    if (!canReadTextFile(settings, resolved)) {
+      return {
+        ok: false,
+        error:
+          'File is outside allowed folders. Choose a workspace that contains it or enable outside-workspace read in Settings.',
+      };
+    }
+
+    const text = fs.readFileSync(resolved, 'utf8');
     return { ok: true, text };
   } catch (e: any) {
     return { ok: false, error: e?.message || String(e) };

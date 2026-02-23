@@ -161,5 +161,5 @@ npm run build:mac:signed
 
 Notes
 - The builder is configured with hardened runtime and entitlements at `assets/entitlements.mac.plist`.
-- Notarization is enabled (`notarize: true`) and uses the env vars above; local builds can also notarize via the Keychain profile (`ensign-notary`) without exposing secrets in env.
+- Builder-level notarization is disabled (`notarize: false`) so local packaging works without Apple credentials; notarization/stapling is performed by `scripts/notarize-mac.sh` for signed release builds.
 - For CI, a ready‑to‑use workflow lives at `.github/workflows/mac-release.yml`.

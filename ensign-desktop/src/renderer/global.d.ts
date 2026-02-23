@@ -1,12 +1,14 @@
+import type { Plan, TaskSummary } from '../main/task_types';
+
 export {};
 
 declare global {
   interface Window {
     codex: {
       run: (prompt: string, opts?: { cwd?: string; sandboxMode?: 'read-only'|'workspace-write'|'danger-full-access'; modelOverride?: string | null }) => Promise<{ ok: boolean; text?: string; error?: string }>;
-      plan: (payload: { prompt: string; files?: { name: string }[]; cwd?: string; sandboxMode?: 'read-only'|'workspace-write'|'danger-full-access'; modelOverride?: string | null }) => Promise<{ ok: boolean; plan?: { steps: { id: string; text: string }[]; permissions: { id: string; label: string; required: boolean }[]; sources: string[] }; error?: string }>;
-      taskList: () => Promise<{ ok: boolean; tasks?: any[]; error?: string }>;
-      taskEnqueue: (payload: any) => Promise<{ ok: boolean; taskId?: string; task?: any; error?: string }>;
+      plan: (payload: { prompt: string; files?: { name: string }[]; cwd?: string; sandboxMode?: 'read-only'|'workspace-write'|'danger-full-access'; modelOverride?: string | null }) => Promise<{ ok: boolean; plan?: Plan; error?: string }>;
+      taskList: () => Promise<{ ok: boolean; tasks?: TaskSummary[]; error?: string }>;
+      taskEnqueue: (payload: any) => Promise<{ ok: boolean; taskId?: string; task?: TaskSummary; error?: string }>;
       taskCancel: (taskId: string) => Promise<{ ok: boolean; error?: string }>;
       taskResume: (payload: { taskId: string; prompt: string }) => Promise<{ ok: boolean; error?: string }>;
       listSkills: (payload?: { cwd?: string | null }) => Promise<{ ok: boolean; skills?: { id: string; name: string; description: string; instructions: string; dir: string; filePath: string }[]; error?: string }>;

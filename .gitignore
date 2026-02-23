@@ -11,6 +11,7 @@ test-results/
 .tmp/
 .idea/
 .vscode/
+.beads/daemon-*.log.gz
 
 # Project outputs
 ensign-desktop/build/

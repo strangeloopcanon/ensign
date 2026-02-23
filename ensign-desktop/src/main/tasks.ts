@@ -1,65 +1,11 @@
-import { BrowserWindow } from 'electron';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import path from 'node:path';
 import process from 'node:process';
 import readline from 'node:readline';
 import type { SandboxMode } from './settings';
 import { resolveBundledCodexPath } from './codex_bin';
-
-export type PlanStep = { id: string; text: string };
-export type PlanPermission = { id: string; label: string; required: boolean };
-export type Plan = { steps: PlanStep[]; permissions: PlanPermission[]; sources: string[] };
-
-export type TaskStatus = 'queued' | 'running' | 'needs_input' | 'completed' | 'failed' | 'canceled';
-
-export type TaskItemType =
-  | 'user_message'
-  | 'agent_message'
-  | 'reasoning'
-  | 'command_execution'
-  | 'file_change'
-  | 'mcp_tool_call'
-  | 'web_search'
-  | 'todo_list'
-  | 'error';
-
-export type TaskItem = {
-  id: string;
-  type: TaskItemType;
-  status?: 'in_progress' | 'completed' | 'failed';
-  text?: string;
-  command?: string;
-  aggregated_output?: string;
-  exit_code?: number;
-  changes?: { path: string; kind: 'add' | 'delete' | 'update' }[];
-  server?: string;
-  tool?: string;
-  query?: string;
-  items?: { text: string; completed: boolean }[];
-  message?: string;
-};
-
-export type TaskSummary = {
-  id: string;
-  title: string;
-  userPrompt: string;
-  effectivePrompt: string;
-  cwd: string | null;
-  sandboxMode: SandboxMode;
-  model: string | null;
-  includePlanTool: boolean;
-  enableSearch: boolean;
-  configOverrides: string[];
-  threadId: string | null;
-  status: TaskStatus;
-  createdAt: number;
-  startedAt: number | null;
-  endedAt: number | null;
-  error: string | null;
-  outputText: string;
-  plan: Plan | null;
-  items: TaskItem[];
-};
+import type { Plan, TaskItem, TaskSummary } from './task_types';
+export type { Plan, PlanPermission, PlanStep, TaskItem, TaskItemType, TaskStatus, TaskSummary } from './task_types';
 
 export type EnqueueTaskPayload = {
   userPrompt: string;
@@ -91,19 +37,7 @@ type TaskQueueEntry =
   | { taskId: string; kind: 'new'; prompt: string }
   | { taskId: string; kind: 'resume'; prompt: string };
 
-function broadcast(channel: string, payload: unknown) {
-  for (const win of BrowserWindow.getAllWindows()) {
-    try {
-      win.webContents.send(channel, payload);
-    } catch {
-      // ignore
-    }
-  }
-}
-
-function broadcastTaskUpdated(taskId: string, patch: Record<string, unknown>) {
-  broadcast('codex:taskEvent', { type: 'task.updated', taskId, patch });
-}
+type TaskEventSink = (event: unknown) => void;
 
 function getApiKey(): string | null {
   return process.env.OPENAI_API_KEY || process.env.CODEX_API_KEY || null;
@@ -160,7 +94,7 @@ function randomId(prefix: string): string {
   return `${prefix}-${now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function addUserMessage(task: TaskSummary, text: string) {
+function addUserMessage(task: TaskSummary, text: string, emitTaskEvent: TaskEventSink) {
   const trimmed = text.trim();
   if (!trimmed) return;
   const item: TaskItem = {
@@ -170,7 +104,7 @@ function addUserMessage(task: TaskSummary, text: string) {
     text: trimmed,
   };
   task.items = [...task.items, item];
-  broadcast('codex:taskEvent', { type: 'task.item', taskId: task.id, item, eventType: 'item.completed' });
+  emitTaskEvent({ type: 'task.item', taskId: task.id, item, eventType: 'item.completed' });
 }
 
 export class TaskManager {
@@ -178,6 +112,15 @@ export class TaskManager {
   private queue: TaskQueueEntry[] = [];
   private running = new Map<string, TaskRuntime>();
   private concurrency = 1;
+  private emitTaskEvent: TaskEventSink;
+
+  constructor(emitTaskEvent?: TaskEventSink) {
+    this.emitTaskEvent = emitTaskEvent ?? (() => {});
+  }
+
+  private broadcastTaskUpdated(taskId: string, patch: Record<string, unknown>) {
+    this.emitTaskEvent({ type: 'task.updated', taskId, patch });
+  }
 
   setConcurrency(n: number) {
     const next = Number.isFinite(n) ? Math.max(1, Math.min(8, Math.floor(n))) : 1;
@@ -216,7 +159,7 @@ export class TaskManager {
 
     this.tasksById.set(id, task);
     this.queue.push({ taskId: id, kind: 'new', prompt: task.effectivePrompt || task.userPrompt });
-    broadcast('codex:taskEvent', { type: 'task.created', task });
+    this.emitTaskEvent({ type: 'task.created', task });
     this.drain();
     return task;
   }
@@ -231,13 +174,18 @@ export class TaskManager {
     if (!task.threadId) return { ok: false, error: 'Task has no recorded session id' };
     if (typeof userPrompt !== 'string' || !userPrompt.trim()) return { ok: false, error: 'Missing prompt' };
 
-    addUserMessage(task, userPrompt);
+    addUserMessage(task, userPrompt, this.emitTaskEvent);
 
     task.status = 'queued';
     task.startedAt = null;
     task.endedAt = null;
     task.error = null;
-    broadcastTaskUpdated(taskId, { status: task.status, startedAt: task.startedAt, endedAt: task.endedAt, error: task.error });
+    this.broadcastTaskUpdated(taskId, {
+      status: task.status,
+      startedAt: task.startedAt,
+      endedAt: task.endedAt,
+      error: task.error,
+    });
 
     this.queue.push({ taskId, kind: 'resume', prompt: userPrompt.trim() });
     this.drain();
@@ -254,8 +202,8 @@ export class TaskManager {
       this.queue.splice(queuedIdx, 1);
       task.status = 'canceled';
       task.endedAt = now();
-      broadcastTaskUpdated(taskId, { status: task.status, endedAt: task.endedAt });
-      broadcast('codex:taskEvent', { type: 'task.finished', taskId });
+      this.broadcastTaskUpdated(taskId, { status: task.status, endedAt: task.endedAt });
+      this.emitTaskEvent({ type: 'task.finished', taskId });
       return { ok: true };
     }
 
@@ -272,8 +220,8 @@ export class TaskManager {
     }
     task.status = 'canceled';
     task.endedAt = now();
-    broadcastTaskUpdated(taskId, { status: task.status, endedAt: task.endedAt });
-    broadcast('codex:taskEvent', { type: 'task.finished', taskId });
+    this.broadcastTaskUpdated(taskId, { status: task.status, endedAt: task.endedAt });
+    this.emitTaskEvent({ type: 'task.finished', taskId });
     this.running.delete(taskId);
     this.drain();
     return { ok: true };
@@ -294,7 +242,12 @@ export class TaskManager {
     task.startedAt = now();
     task.endedAt = null;
     task.error = null;
-    broadcastTaskUpdated(taskId, { status: task.status, startedAt: task.startedAt, endedAt: task.endedAt, error: task.error });
+    this.broadcastTaskUpdated(taskId, {
+      status: task.status,
+      startedAt: task.startedAt,
+      endedAt: task.endedAt,
+      error: task.error,
+    });
 
     const rt: TaskRuntime = {
       taskId,
@@ -324,7 +277,7 @@ export class TaskManager {
         const cwd = task.cwd ?? process.cwd();
         const text = `Stub run in ${cwd}: ${task.userPrompt.slice(0, 200)}\n`;
         task.outputText += text;
-        broadcast('codex:taskEvent', { type: 'task.outputDelta', taskId, delta: text });
+        this.emitTaskEvent({ type: 'task.outputDelta', taskId, delta: text });
         this.finish(taskId, task, rt, null);
       }, stubDelayMs);
       return;
@@ -428,7 +381,7 @@ export class TaskManager {
         if (threadId && task.threadId !== threadId) {
           task.threadId = threadId;
           rt.threadId = threadId;
-          broadcastTaskUpdated(taskId, { threadId });
+          this.broadcastTaskUpdated(taskId, { threadId });
         }
         return;
       }
@@ -439,13 +392,13 @@ export class TaskManager {
           rt.itemsById.set(item.id, item);
           rt.itemsOrder.push(item.id);
           syncTaskItems(task, rt);
-          broadcast('codex:taskEvent', { type: 'task.item', taskId, item, eventType: type });
+          this.emitTaskEvent({ type: 'task.item', taskId, item, eventType: type });
         }
         return;
       }
       case 'turn.failed': {
         rt.turnFailure = String(ev?.error?.message || 'Turn failed');
-        broadcast('codex:taskEvent', { type: 'task.turnFailed', taskId, error: rt.turnFailure });
+        this.emitTaskEvent({ type: 'task.turnFailed', taskId, error: rt.turnFailure });
         return;
       }
       default:
@@ -469,11 +422,11 @@ export class TaskManager {
       rt.lastAgentTextById.set(item.id, text);
       if (delta) {
         task.outputText += delta;
-        broadcast('codex:taskEvent', { type: 'task.outputDelta', taskId, delta });
+        this.emitTaskEvent({ type: 'task.outputDelta', taskId, delta });
       }
     }
 
-    broadcast('codex:taskEvent', { type: 'task.item', taskId, item, eventType: type });
+    this.emitTaskEvent({ type: 'task.item', taskId, item, eventType: type });
   }
 
   private finish(taskId: string, task: TaskSummary, rt: TaskRuntime, error: string | null) {
@@ -484,7 +437,7 @@ export class TaskManager {
     if (finalError) {
       task.status = rt.canceled ? 'canceled' : 'failed';
       task.error = finalError;
-      broadcastTaskUpdated(taskId, { status: task.status, endedAt: task.endedAt, error: task.error });
+      this.broadcastTaskUpdated(taskId, { status: task.status, endedAt: task.endedAt, error: task.error });
     } else {
       if (rt.canceled) {
         task.status = 'canceled';
@@ -493,10 +446,10 @@ export class TaskManager {
       } else {
         task.status = 'completed';
       }
-      broadcastTaskUpdated(taskId, { status: task.status, endedAt: task.endedAt });
+      this.broadcastTaskUpdated(taskId, { status: task.status, endedAt: task.endedAt });
     }
 
-    broadcast('codex:taskEvent', { type: 'task.finished', taskId });
+    this.emitTaskEvent({ type: 'task.finished', taskId });
     this.drain();
   }
 }
