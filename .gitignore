@@ -1,9 +1,11 @@
 # Root ignores
 .env
 .env.*
-!codex-desktop/config/.env.example
+!.env.example
+AGENTS.md
 .DS_Store
 *.log
+.beads/
 node_modules/
 coverage/
 playwright-report/
@@ -11,13 +13,13 @@ test-results/
 .tmp/
 .idea/
 .vscode/
-.beads/daemon-*.log.gz
 
 # Project outputs
 ensign-desktop/build/
 ensign-desktop/release/
 ensign-desktop/node_modules/
 ensign-desktop/test-results/
+!ensign-desktop/config/.env.example
 
 # OS junk
 Thumbs.db
