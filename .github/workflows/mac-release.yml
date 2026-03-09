@@ -1,5 +1,8 @@
 name: macOS Signed Build
 
+permissions:
+  contents: write
+
 on:
   workflow_dispatch:
   push:
@@ -37,5 +40,15 @@ jobs:
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ensign-desktop-dmg
-          path: ensign-desktop/release/*.dmg
+          name: ensign-desktop-mac-build
+          path: |
+            ensign-desktop/release/*.dmg
+            ensign-desktop/release/*.zip
+      - name: Publish release asset
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ensign-desktop/release/*.dmg
+            ensign-desktop/release/*.zip
+          generate_release_notes: true
