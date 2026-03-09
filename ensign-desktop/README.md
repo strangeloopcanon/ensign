@@ -3,7 +3,7 @@
 Command-first Electron app that wraps the Codex CLI/SDK with a single-screen "Command + Canvas" experience. Type a task (and optionally drop files), review the dry-run plan, grant permissions, then run to generate the artifact. Deterministic outputs are versioned to an `AI Output` folder and saves are undoable.
 
 ## Install & Use (Packaged App)
-If you have a packaged build, distribute the `.dmg` (it contains the `.app`).
+If you have a packaged build, distribute the signed `.dmg` (it contains the `.app`).
 
 1. Open the `.dmg` → drag the app into **Applications**.
 2. Launch the app from **Applications**.
@@ -12,11 +12,21 @@ If you have a packaged build, distribute the `.dmg` (it contains the `.app`).
 5. Type a task → **Generate plan** → review the **Execution plan** → check required permissions → **Run**.
 6. Use **Save As** to write outputs into `~/Documents/AI Output/` (or your Settings override).
 
+## Distribution Options
+- **Just install:** share the signed `.dmg` from `ensign-desktop/release/`. While the repo is private, send that file directly. Once the repo is public, tagged builds can also be attached to GitHub Releases.
+- **Clone and build:** clone the repo, run `make setup`, then `make all`. For a local app bundle run `cd ensign-desktop && npm run build:mac`; for a signed/notarized DMG run `cd ensign-desktop && npm run build:mac:signed`.
+
 ## Developer Quick Start
-1. **Install deps**
+1. **Clone + install deps**
+   ```bash
+   git clone https://github.com/strangeloopcanon/ensign.git
+   cd ensign
+   make setup
+   ```
+   Or, if you only want the app package tooling:
    ```bash
    cd ensign-desktop
-   npm install
+   npm ci
    ```
 2. **Configure API key**
    - On first launch, Ensign prompts for a key. Paste it into **Settings → Connection** (stored in the app’s `.env`).
@@ -45,6 +55,11 @@ If you have a packaged build, distribute the `.dmg` (it contains the `.app`).
   ```bash
   npm run build
   ```
+- **macOS (signed + notarized DMG)**
+  ```bash
+  npm run build:mac:signed
+  ```
+  This requires a local Developer ID certificate plus the `ensign-notary` Keychain profile (or equivalent env-based notarization credentials if you adapt the script).
 - **Windows (NSIS + MSI)**
   ```bash
   npm run build:win
@@ -56,7 +71,9 @@ If you have a packaged build, distribute the `.dmg` (it contains the `.app`).
   ```
   Requires `fpm`/dpkg tooling; easiest in the builder image or a native Linux environment.
 
-Artifacts land in `release/` and the runnable unpacked apps live under `release/<platform>-unpacked/`.
+Artifacts land in `release/`. The main macOS outputs are:
+- `release/Ensign-<version>-<arch>.dmg` for end users
+- `release/mac-<arch>/Ensign.app` for local inspection/debugging
 
 ## Command + Canvas UX
 - **Command bar** accepts text and drag-and-drop files.
@@ -162,4 +179,5 @@ npm run build:mac:signed
 Notes
 - The builder is configured with hardened runtime and entitlements at `assets/entitlements.mac.plist`.
 - Builder-level notarization is disabled (`notarize: false`) so local packaging works without Apple credentials; notarization/stapling is performed by `scripts/notarize-mac.sh` for signed release builds.
-- For CI, a ready‑to‑use workflow lives at `.github/workflows/mac-release.yml`.
+- `scripts/make-dmg.sh` signs the DMG itself when the app bundle carries a Developer ID signature, which keeps Gatekeeper happy for direct installs.
+- For CI, `.github/workflows/mac-release.yml` uploads the mac build as an artifact and, on tag pushes, attaches the DMG/ZIP to a GitHub Release.

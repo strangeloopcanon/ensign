@@ -65,4 +65,5 @@ echo "$SUBMIT_OUTPUT"
 if [[ "$ARCHIVE_KIND" == "dmg" ]]; then
   xcrun stapler staple -v "$ARCHIVE_PATH"
   xcrun stapler validate -v "$ARCHIVE_PATH"
+  spctl -a -vvv -t install "$ARCHIVE_PATH"
 fi
