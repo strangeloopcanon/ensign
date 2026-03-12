@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-.PHONY: setup check test llm-live deps-audit all
+.PHONY: setup check test llm-live deps-audit all distribute
 
 AGENT_MODE ?= baseline
 
@@ -30,3 +30,6 @@ all: check test
 	@if [ "$(AGENT_MODE)" = "production" ]; then \
 		$(MAKE) deps-audit; \
 	fi
+
+distribute:
+	cd ensign-desktop && bash scripts/distribute.sh

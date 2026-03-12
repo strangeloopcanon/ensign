@@ -25,3 +25,7 @@ ensign-desktop/test-results/
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+
+# Dolt database files (added by bd init)
+.dolt/
+*.db

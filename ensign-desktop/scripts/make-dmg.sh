@@ -21,7 +21,6 @@ OUT_DMG="release/${PRODUCT_NAME}-${VERSION}-${ARCH}.dmg"
 OUT_ZIP="release/${PRODUCT_NAME}-${VERSION}-${ARCH}.zip"
 
 TMP_DIR="$(mktemp -d)"
-TMP_RW="${TMP_DIR}/${PRODUCT_NAME}-${VERSION}-${ARCH}-rw.dmg"
 STAGING_DIR="${TMP_DIR}/stage"
 
 cleanup() {
@@ -53,27 +52,15 @@ rm -f "$OUT_ZIP"
 mkdir -p "$STAGING_DIR"
 cp -R "$APP_PATH" "${STAGING_DIR}/${PRODUCT_NAME}.app"
 
-# NOTE: We intentionally do NOT include an /Applications symlink here because
-# `hdiutil create -srcfolder` attempts to follow it in some sandboxed runners,
-# causing hard-to-diagnose failures. Keeping the DMG simple makes it robust.
+# No /Applications symlink: hdiutil follows it in some sandboxed runners.
 
-# DMG builder deps default to APFS; HFS+ is more broadly compatible.
 if ! hdiutil create \
   -srcfolder "$STAGING_DIR" \
-  -volname "${PRODUCT_NAME} ${VERSION}-${ARCH}" \
-  -anyowners \
-  -nospotlight \
-  -format UDRW \
-  -fs HFS+ \
-  "$TMP_RW"; then
-  echo "make-dmg: failed to create DMG (likely due to sandbox restrictions); creating a .zip instead" >&2
-  ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$OUT_ZIP"
-  echo "Created: $OUT_ZIP"
-  exit 0
-fi
-
-if ! hdiutil convert "$TMP_RW" -format UDZO -imagekey zlib-level=9 -o "$OUT_DMG"; then
-  echo "make-dmg: failed to convert DMG; creating a .zip instead" >&2
+  -volname "${PRODUCT_NAME}" \
+  -format UDZO \
+  -imagekey zlib-level=9 \
+  "$OUT_DMG"; then
+  echo "make-dmg: hdiutil failed; creating a .zip instead" >&2
   ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$OUT_ZIP"
   echo "Created: $OUT_ZIP"
   exit 0
